@@ -9,8 +9,9 @@ const router   = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const { Resend } = require('resend');
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const resend    = new Resend(process.env.RESEND_API_KEY);
+// Lazy-init so missing env vars at module-load time don't crash the server
+function getAI()     { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }); }
+function getResend() { return new Resend(process.env.RESEND_API_KEY); }
 
 const MODEL      = 'claude-sonnet-4-20250514';
 const FROM_EMAIL = 'jmcompton04@gmail.com'; // TODO: swap to hello@comptongroupllc.com
@@ -45,7 +46,7 @@ Return as a JSON array only, no preamble or markdown. Each element should have t
 company, contact_name, contact_title, email, website, industry, revenue_range, tech_stack, ai_opportunity`;
 
   try {
-    const response = await anthropic.messages.create({
+    const response = await getAI().messages.create({
       model: MODEL,
       max_tokens: 4000,
       tools: [{
@@ -135,7 +136,7 @@ router.post('/prospects/:id/approve', async (req, res) => {
     // Quick AI call to pick sequence type
     let sequenceType = 'efficiency'; // default
     try {
-      const msg = await anthropic.messages.create({
+      const msg = await getAI().messages.create({
         model: MODEL,
         max_tokens: 50,
         messages: [{
@@ -224,7 +225,7 @@ router.post('/draft-sequence', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Invalid sequence_type' });
 
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await getAI().messages.create({
       model: MODEL,
       max_tokens: 2000,
       system: `You are an expert B2B SaaS sales copywriter. Write concise, compelling cold emails. Keep each email under 150 words. Direct. No fluff. No "I hope this email finds you well." Founder-to-founder voice.`,
@@ -340,7 +341,7 @@ router.post('/run-outreach', async (req, res) => {
         .replace(/\{industry\}/gi, p.industry || 'your industry');
 
       try {
-        const result = await resend.emails.send({
+        const result = await getResend().emails.send({
           from: `JohnMark Compton <${FROM_EMAIL}>`,
           to:   p.email || FROM_EMAIL, // fallback to self if no email
           subject: personalSubject,
