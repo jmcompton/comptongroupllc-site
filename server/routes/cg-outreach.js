@@ -7,15 +7,89 @@
 const express  = require('express');
 const router   = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
-const { Resend } = require('resend');
 
 // Lazy-init so missing env vars at module-load time don't crash the server
 function getAI()     { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }); }
-function getResend() { return new Resend(process.env.RESEND_API_KEY); }
 
 const MODEL      = 'claude-sonnet-4-20250514';
-const FROM_EMAIL = 'jmcompton04@gmail.com'; // TODO: swap to hello@comptongroupllc.com
+const FROM_EMAIL = process.env.SENDER_EMAIL || 'john@comptongroupllc.com';
 const DAILY_LIMIT = 20;
+
+// ── Microsoft Graph email transport (app-only / client credentials) ──────────
+// Sends real mail through Microsoft 365 as SENDER_EMAIL. All credentials come
+// from process.env (never hardcoded). Token is cached in memory and reused
+// until ~60s before expiry.
+let _graphToken = null;       // { value, expiresAt (ms epoch) }
+
+async function getGraphToken() {
+  const now = Date.now();
+  if (_graphToken && _graphToken.expiresAt - 60_000 > now) {
+    return _graphToken.value; // still valid (with 60s safety margin)
+  }
+  const tenant = process.env.GRAPH_TENANT_ID;
+  const clientId = process.env.GRAPH_CLIENT_ID;
+  const clientSecret = process.env.GRAPH_CLIENT_SECRET;
+  if (!tenant || !clientId || !clientSecret) {
+    throw new Error('Microsoft Graph not configured (missing GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET)');
+  }
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials',
+  });
+
+  const resp = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Graph token request failed (${resp.status}): ${text}`);
+  }
+  const json = JSON.parse(text);
+  _graphToken = {
+    value: json.access_token,
+    expiresAt: Date.now() + (Number(json.expires_in) || 3600) * 1000,
+  };
+  return _graphToken.value;
+}
+
+// sendEmail(to, subject, bodyHtml) → resolves on HTTP 202, throws on any failure
+// with the response body included so it surfaces in the Outreach Log.
+async function sendEmail(to, subject, bodyHtml) {
+  const sender = process.env.SENDER_EMAIL || FROM_EMAIL;
+  const token = await getGraphToken();
+
+  const payload = {
+    message: {
+      subject,
+      body: { contentType: 'HTML', content: bodyHtml },
+      toRecipients: [{ emailAddress: { address: to } }],
+    },
+    saveToSentItems: true,
+  };
+
+  const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (resp.status === 202) {
+    return { ok: true, status: 202 };
+  }
+  const errBody = await resp.text().catch(() => '');
+  const msg = `Graph sendMail failed (${resp.status}) to ${to}: ${errBody}`;
+  console.error('[cg/sendEmail]', msg);
+  throw new Error(msg);
+}
 
 let pool; // injected by server.js
 function setPool(p) { pool = p; }
@@ -341,12 +415,7 @@ router.post('/run-outreach', async (req, res) => {
         .replace(/\{industry\}/gi, p.industry || 'your industry');
 
       try {
-        const result = await getResend().emails.send({
-          from: `JohnMark Compton <${FROM_EMAIL}>`,
-          to:   p.email || FROM_EMAIL, // fallback to self if no email
-          subject: personalSubject,
-          text: personalBody,
-          html: `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">
+        const html = `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">
 ${personalBody.replace(/\n/g, '<br>')}
 <br><br>
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
@@ -354,14 +423,14 @@ ${personalBody.replace(/\n/g, '<br>')}
   JohnMark Compton · Founder, Compton Group LLC<br>
   <a href="https://comptongroupllc.com" style="color:#c9a84c">comptongroupllc.com</a>
 </p>
-</div>`,
-        });
+</div>`;
+        await sendEmail(p.email || FROM_EMAIL, personalSubject, html); // fallback to self if no email
 
         // Log the send
         await pool.query(
           `INSERT INTO cg_outreach_log (prospect_id, sequence_type, email_number, resend_id, status)
            VALUES ($1,$2,$3,$4,'sent')`,
-          [p.id, p.sequence_type || 'efficiency', emailNum, result?.data?.id || null]
+          [p.id, p.sequence_type || 'efficiency', emailNum, null]
         );
 
         // Update prospect status + timestamp
@@ -450,6 +519,36 @@ router.get('/badge', async (req, res) => {
     res.json({ replied: parseInt(r.rows[0].cnt) || 0 });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/cg/test-email ───────────────────────────────────────────────────
+// Admin-only test send through Microsoft Graph. Confirms Graph works before
+// running real outreach. Returns the full result (or error) so the admin sees it.
+router.post('/test-email', async (req, res) => {
+  const { to } = req.body;
+  const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!to || !emailRx.test(to.trim())) {
+    return res.status(400).json({ error: 'A valid recipient email is required' });
+  }
+  const recipient = to.trim();
+  const subject = 'Compton Group LLC — Microsoft Graph test email';
+  const html = `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">
+<p>This is a test email sent from the CG Outreach Agent via the Microsoft Graph API.</p>
+<p>If you are reading this, Microsoft 365 sending is wired up correctly. ✅</p>
+<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+<p style="font-size:11px;color:#6b7280">
+  JohnMark Compton · Founder, Compton Group LLC<br>
+  <a href="https://comptongroupllc.com" style="color:#c9a84c">comptongroupllc.com</a>
+</p>
+</div>`;
+  try {
+    const result = await sendEmail(recipient, subject, html);
+    console.log('[cg/test-email] sent to', recipient, result);
+    res.json({ success: true, to: recipient, sender: process.env.SENDER_EMAIL || FROM_EMAIL, result });
+  } catch (e) {
+    console.error('[cg/test-email]', e.message);
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 

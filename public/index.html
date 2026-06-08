@@ -1178,6 +1178,16 @@ button,input,select,textarea{font-family:inherit}
         </div>
         <button class="ag-btn ag-btn-green" id="run-outreach-btn" onclick="runOutreach()">▶ Run Outreach Now</button>
       </div>
+      <div class="run-bar" style="margin-top:12px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#f0f0f5;margin-bottom:2px">Send Test Email</div>
+          <div class="run-msg">Sends a single test email through Microsoft Graph to confirm sending works</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="email" id="test-email-input" placeholder="you@example.com" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 12px;color:#f0f0f5;font-size:13px;min-width:220px">
+          <button class="ag-btn" id="test-email-btn" onclick="sendTestEmail()">✉ Send Test</button>
+        </div>
+      </div>
       <div class="ag-section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <div class="ag-section-title" style="margin-bottom:0">All Prospects — Outreach Status</div>
@@ -1734,6 +1744,33 @@ async function runOutreach() {
   } finally {
     btn.disabled = false;
     btn.textContent = '▶ Run Outreach Now';
+  }
+}
+
+async function sendTestEmail() {
+  const input = document.getElementById('test-email-input');
+  const btn = document.getElementById('test-email-btn');
+  const to = (input.value || '').trim();
+  if (!to) { showToast('Enter a recipient email', true); return; }
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+  try {
+    const r = await fetch('/api/cg/test-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to }),
+    });
+    const data = await r.json();
+    if (r.ok && data.success) {
+      showToast(`Test email sent to ${data.to} (from ${data.sender})`);
+    } else {
+      showToast(`Error: ${data.error || 'send failed'}`, true);
+    }
+  } catch (e) {
+    showToast(`Error: ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✉ Send Test';
   }
 }
 
