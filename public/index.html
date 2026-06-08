@@ -293,6 +293,70 @@ button,input,select,textarea{font-family:inherit}
   transition:color var(--transition),gap var(--transition);
 }
 .hero-cta-secondary:hover{color:var(--white);gap:10px}
+.hero-note{
+  margin-top:18px;
+  font-size:12px;
+  color:var(--gray-dim);
+  letter-spacing:0.02em;
+  opacity:0;
+  animation:fadeUp 0.7s ease 1.05s forwards;
+}
+
+/* ── Proof / founder note ────────────────────────────────────── */
+.proof-meta{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  font-size:11px;
+  font-weight:500;
+  color:#7fd99a;
+  background:rgba(74,222,128,0.08);
+  border:1px solid rgba(74,222,128,0.18);
+  border-radius:20px;
+  padding:4px 11px;
+  margin-bottom:18px;
+  width:fit-content;
+}
+.proof-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.6)}
+.product-link.secondary{
+  font-size:11px;
+  color:var(--gray-dim);
+  font-weight:400;
+}
+.product-link.secondary:hover{color:var(--gold)}
+.founder{
+  max-width:680px;
+  margin:0 auto;
+  padding:100px 24px;
+}
+.founder-card{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-left:3px solid var(--gold);
+  border-radius:var(--radius);
+  padding:40px 40px 34px;
+}
+.founder-card p{
+  font-size:15.5px;
+  color:var(--gray);
+  line-height:1.85;
+  font-weight:300;
+  margin-bottom:16px;
+}
+.founder-card p:last-of-type{margin-bottom:24px}
+.founder-card strong{color:var(--white);font-weight:500}
+.founder-sign{
+  font-family:'Cormorant Garamond',Georgia,serif;
+  font-size:20px;
+  color:var(--gold-light);
+  font-weight:600;
+}
+.founder-role{
+  font-size:12px;
+  color:var(--gray-dim);
+  letter-spacing:0.04em;
+  margin-top:2px;
+}
 
 /* ── Divider ─────────────────────────────────────────────────── */
 .section-divider{
@@ -671,6 +735,8 @@ button,input,select,textarea{font-family:inherit}
   .products{padding:60px 20px 80px}
   .whatwedo{padding:64px 20px}
   .about{padding:64px 20px}
+  .founder{padding:64px 20px}
+  .founder-card{padding:30px 24px 26px}
   .contact{padding:64px 20px}
   .cta-band{padding:48px 20px}
   .hero{padding:104px 22px 72px}
@@ -1098,44 +1164,49 @@ button,input,select,textarea{font-family:inherit}
     </div>
   </div>
   <p class="hero-eyebrow">Compton Group LLC · Est. 2026 · Georgia</p>
-  <h1>Custom AI software,<br><em>built for your business.</em></h1>
-  <p class="hero-sub">We're a Georgia software company that builds AI tools to handle the repetitive, time-draining parts of your business — so you can focus on the work that makes you money.</p>
+  <h1>Custom AI that handles the busywork —<br><em>so you don't lose time or customers.</em></h1>
+  <p class="hero-sub">We're a Georgia software company that builds simple AI tools for local businesses — built around how your business actually works.</p>
   <div class="hero-cta-group">
     <a href="#contact" class="hero-cta-primary">Get a free AI audit</a>
-    <a href="#products" class="hero-cta-secondary">See what we've built
-      <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </a>
   </div>
+  <p class="hero-note">Free 15-minute audit. No pitch, no commitment.</p>
 </section>
 
 <hr class="section-divider">
 
-<!-- ═══ WHAT WE DO ═══ -->
+<!-- ═══ WHAT WE CAN BUILD ═══ -->
 <section class="whatwedo" id="what" aria-labelledby="what-heading">
-  <p class="section-label reveal">What we do</p>
-  <h2 class="section-heading reveal reveal-delay-1" id="what-heading">Tell us what eats up your week.</h2>
-  <p class="whatwedo-lead reveal reveal-delay-2"><strong>We'll show you one specific thing AI can take off your plate.</strong> Free, no pitch — just a clear look at where software can save you hours.</p>
+  <p class="section-label reveal">What we can build for you</p>
+  <h2 class="section-heading reveal reveal-delay-1" id="what-heading">Here's what AI can take off your plate.</h2>
+  <p class="whatwedo-lead reveal reveal-delay-2"><strong>Tell us what eats up your week — we'll show you one specific thing AI can take off your plate.</strong> Free, no pitch, no commitment.</p>
   <div class="do-grid">
     <div class="do-card reveal reveal-delay-1">
       <div class="do-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <h3>Text back missed calls</h3>
-      <p>When you can't pick up, an AI assistant texts the caller back in seconds — so the job doesn't go to the next shop on the list.</p>
+      <h3>Never lose a missed call</h3>
+      <p>Instantly text back every missed call and book the job — so the lead doesn't go to the next shop on the list while you're on a ladder.</p>
     </div>
     <div class="do-card reveal reveal-delay-2">
       <div class="do-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="#c9a84c" stroke-width="1.6"/><path d="M3 9h18M8 2v4M16 2v4" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round"/></svg>
       </div>
-      <h3>Automate scheduling &amp; intake</h3>
-      <p>Let customers book, confirm, and fill out intake on their own — day or night — without you playing phone tag or retyping anything.</p>
+      <h3>A 24/7 assistant</h3>
+      <p>An assistant that handles scheduling and answers common customer questions around the clock — even when you're closed or on a job.</p>
     </div>
     <div class="do-card reveal reveal-delay-3">
       <div class="do-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M4 12h16M4 19h10" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
-      <h3>Cut repetitive admin</h3>
-      <p>Quotes, follow-ups, reminders, data entry — the small tasks that pile up. We build tools that handle them quietly in the background.</p>
+      <h3>Follow-ups on autopilot</h3>
+      <p>Automated follow-ups and review requests that run themselves — so you stop leaving repeat business and five-star reviews on the table.</p>
+    </div>
+    <div class="do-card reveal reveal-delay-3">
+      <div class="do-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l2.4 5.4 5.6.6-4.2 3.8 1.2 5.6L12 20l-5 2.8 1.2-5.6L4 13.4l5.6-.6L12 2z" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3>A custom tool for your work</h3>
+      <p>Whatever eats your time — quotes, intake, scheduling, data entry — we'll build a tool around how your business actually runs.</p>
     </div>
   </div>
 </section>
@@ -1155,40 +1226,41 @@ button,input,select,textarea{font-family:inherit}
 <section class="products" id="products" aria-labelledby="products-heading">
   <div style="text-align:center;margin-bottom:0">
     <p class="section-label reveal">Proof</p>
-    <h2 class="section-heading reveal reveal-delay-1" id="products-heading">We don't just talk about AI —<br>we build and run it.</h2>
-    <p class="section-body reveal reveal-delay-2" style="max-width:560px;margin:18px auto 0">Three live platforms we designed, built, and operate ourselves. The same approach goes into the tools we build for you.</p>
+    <h2 class="section-heading reveal reveal-delay-1" id="products-heading">We don't just talk about AI —<br>here's what we've built and run.</h2>
+    <p class="section-body reveal reveal-delay-2" style="max-width:560px;margin:18px auto 0">These are real platforms we designed, built, and run ourselves. The same hands build the tool for your business.</p>
   </div>
   <div class="products-grid">
     <div class="product-card reveal reveal-delay-1">
-      <span class="product-tag">NIL Intelligence</span>
-      <div class="product-name">NILDash</div>
-      <p class="product-desc">The all-in-one NIL management platform for sports agents. Track deals, value athletes, manage compliance, generate contracts, and run AI-powered brand outreach — all in one place.</p>
-      <a href="https://mynildash.com" target="_blank" rel="noopener" class="product-link">
-        Visit NILDash
-        <svg class="product-link-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="#c9a84c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <span class="product-tag">Built &amp; running</span>
+      <div class="product-name">RepRoute</div>
+      <p class="product-desc">A sales tool with route planning, client history, and AI-assisted call prep. <strong style="color:#c0c0d0;font-weight:500">Used every day by a real sales team to run their week.</strong></p>
+      <div class="proof-meta"><span class="proof-dot"></span> In daily use</div>
+      <a href="https://app.comptongroupllc.com" target="_blank" rel="noopener" class="product-link secondary">
+        Visit RepRoute
+        <svg class="product-link-arrow" width="11" height="11" viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </a>
     </div>
     <div class="product-card reveal reveal-delay-2">
-      <span class="product-tag">Sales Intelligence</span>
-      <div class="product-name">RepMatchPro</div>
-      <p class="product-desc">AI-powered sales rep matching platform. Connect brands with the right independent reps using intelligent fit scoring, territory analysis, and automated outreach workflows.</p>
-      <a href="https://repmatchpro.com" target="_blank" rel="noopener" class="product-link">
-        Visit RepMatchPro
-        <svg class="product-link-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="#c9a84c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <span class="product-tag">Built &amp; running</span>
+      <div class="product-name">NILDash</div>
+      <p class="product-desc">An all-in-one platform that tracks deals, manages compliance, generates contracts, and runs AI-powered outreach — the kind of moving parts we can wire together for you.</p>
+      <a href="https://mynildash.com" target="_blank" rel="noopener" class="product-link secondary">
+        Visit NILDash
+        <svg class="product-link-arrow" width="11" height="11" viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </a>
     </div>
     <div class="product-card reveal reveal-delay-3">
-      <span class="product-tag">Sales Management</span>
-      <div class="product-name">RepRoute</div>
-      <p class="product-desc">Complete CRM and route management for independent sales representatives. Territory mapping, commission tracking, client history, and AI-assisted call prep in one lean platform.</p>
-      <a href="https://app.comptongroupllc.com" target="_blank" rel="noopener" class="product-link">
-        Visit RepRoute
-        <svg class="product-link-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="#c9a84c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <span class="product-tag">Built &amp; running</span>
+      <div class="product-name">RepMatchPro</div>
+      <p class="product-desc">Smart matching that scores fit and automates outreach to connect the right people — proof we can build AI that makes a real decision, not just a chatbot.</p>
+      <a href="https://repmatchpro.com" target="_blank" rel="noopener" class="product-link secondary">
+        Visit RepMatchPro
+        <svg class="product-link-arrow" width="11" height="11" viewBox="0 0 12 12" fill="none">
+          <path d="M2.5 9.5L9.5 2.5M9.5 2.5H4.5M9.5 2.5V7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </a>
     </div>
@@ -1197,13 +1269,16 @@ button,input,select,textarea{font-family:inherit}
 
 <hr class="section-divider">
 
-<!-- ═══ ABOUT ═══ -->
-<section class="about" id="about" aria-labelledby="about-heading">
-  <p class="section-label reveal">About</p>
-  <h2 class="section-heading reveal reveal-delay-1" id="about-heading">A small Georgia shop<br>that ships real software.</h2>
-  <p class="section-body reveal reveal-delay-2">
-    Compton Group LLC is founder-led and based in Georgia, working with businesses across the Atlanta–Birmingham area. We build practical AI tools, put them to work, and stick around to make sure they actually help. No big agency, no runaround — you talk to the person building your software.
-  </p>
+<!-- ═══ FOUNDER NOTE ═══ -->
+<section class="founder" id="about" aria-labelledby="founder-heading">
+  <p class="section-label reveal" style="text-align:center">From the founder</p>
+  <div class="founder-card reveal reveal-delay-1">
+    <p>I'm a software builder in Georgia, and I started Compton Group to do one thing well: build practical AI tools for local businesses around here.</p>
+    <p>When you reach out, <strong>you're talking to the person who actually builds it</strong> — not a sales team, not an account manager who hands you off. I'll look at your business, show you one specific thing AI could take off your plate, and if it's worth building, I'll build it.</p>
+    <p>No jargon, no big agency runaround. Just real software that saves you time.</p>
+    <div class="founder-sign">JohnMark</div>
+    <div class="founder-role">Founder — Compton Group LLC</div>
+  </div>
 </section>
 
 <hr class="section-divider">
