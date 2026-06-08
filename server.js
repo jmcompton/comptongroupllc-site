@@ -118,7 +118,10 @@ app.listen(PORT, async () => {
         ADD COLUMN IF NOT EXISTS draft_email2_body TEXT,
         ADD COLUMN IF NOT EXISTS draft_email3_subject TEXT,
         ADD COLUMN IF NOT EXISTS draft_email3_body TEXT,
-        ADD COLUMN IF NOT EXISTS drafted BOOLEAN DEFAULT FALSE
+        ADD COLUMN IF NOT EXISTS drafted BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS email_type TEXT,
+        ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS email_source TEXT
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cg_sequences (

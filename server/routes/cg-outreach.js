@@ -7,6 +7,7 @@
 const express  = require('express');
 const router   = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
+const dns      = require('dns').promises;
 
 // Lazy-init so missing env vars at module-load time don't crash the server
 function getAI()     { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }); }
@@ -144,6 +145,156 @@ async function sendEmail(to, subject, bodyHtml) {
 let pool; // injected by server.js
 function setPool(p) { pool = p; }
 
+// ── Email discovery + verification ────────────────────────────────────────────
+// Find the single BEST real, PUBLISHED contact email for a business, then verify
+// it (format + DNS MX) before it can ever be stored. We never fabricate or
+// pattern-guess an address — a wrong/guessed email bounces and damages our
+// sending domain's reputation.
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmailFormat(email) {
+  return typeof email === 'string' && EMAIL_RX.test(email.trim());
+}
+
+// Resolve MX records for an email's domain. Returns true only if the domain can
+// actually receive mail. Falls back to checking A records is NOT done — no MX
+// means no reliable mail delivery, so we reject.
+async function domainHasMx(email) {
+  const at = email.lastIndexOf('@');
+  if (at < 0) return false;
+  const domain = email.slice(at + 1).trim().toLowerCase();
+  if (!domain || domain.indexOf('.') < 0) return false;
+  try {
+    const mx = await dns.resolveMx(domain);
+    return Array.isArray(mx) && mx.length > 0 && mx.some(r => r.exchange);
+  } catch (_) {
+    return false; // NXDOMAIN / no MX / lookup failure → cannot receive mail
+  }
+}
+
+// Ask Claude (with web search) to find the best published email for ONE prospect.
+// Returns { email, email_type, email_source } with email_type in
+// 'owner'|'role'|'generic', or { email: '' } when nothing real is found.
+async function discoverBestEmail(p) {
+  const ownerHint = (p.contact_name || p.first_name)
+    ? `The owner/primary contact appears to be "${p.contact_name || p.first_name}"${p.contact_title ? ` (${p.contact_title})` : ''}. Look for THIS person's direct email FIRST.`
+    : `No specific contact name is known.`;
+
+  const prompt = `Find the single BEST real, PUBLISHED contact email for this small local business so a founder can send them a cold outreach email that actually reaches a decision-maker.
+
+Business: ${p.company || ''}
+City/State: ${p.city || ''}, ${p.state || (p.metro === 'birmingham' ? 'AL' : p.metro === 'atlanta' ? 'GA' : '')}
+Website: ${p.website || '(unknown)'}
+Industry: ${p.industry || ''}
+${ownerHint}
+
+Search the business's OWN website (contact, about, team, staff pages) and reputable business listings (Google Business, Yelp, Facebook, BBB, chamber of commerce, industry directories).
+
+Choose ONE email by this strict priority:
+1. owner — the owner's or a named decision-maker's DIRECT personal business email (best chance of a reply/sale).
+2. role  — the business's primary monitored mailbox or a sales@ address an owner likely reads.
+3. generic — a generic info@/contact@/office@ address ONLY as a last resort.
+
+ABSOLUTE HARD RULES:
+- Only return an email that is ACTUALLY PUBLISHED on a real, verifiable source you found.
+- NEVER invent an address. NEVER construct one from a pattern (do NOT build "info@"+domain or "firstname@"+domain). If that exact address is not genuinely published somewhere, do NOT return it.
+- If you cannot find any real published email, return an empty string for email.
+
+Return JSON ONLY, no markdown, exactly:
+{"email":"the published email or empty string","email_type":"owner|role|generic","email_source":"short description + URL where you found it"}`;
+
+  const response = await getAI().messages.create({
+    model: MODEL,
+    max_tokens: 1500,
+    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  let raw = '';
+  for (const block of response.content) {
+    if (block.type === 'text') raw += block.text;
+  }
+
+  let out = {};
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) out = JSON.parse(match[0]);
+  } catch (_) { out = {}; }
+
+  const email = (out.email || '').trim().toLowerCase();
+  let type = (out.email_type || '').trim().toLowerCase();
+  if (!['owner', 'role', 'generic'].includes(type)) type = 'generic';
+  return { email, email_type: type, email_source: (out.email_source || '').trim() };
+}
+
+// Discover + verify + persist the best email for one prospect row.
+// Returns { ok, email, email_type, email_source, reason }.
+async function findAndVerifyEmailFor(p) {
+  let cand;
+  try {
+    cand = await discoverBestEmail(p);
+  } catch (e) {
+    return { ok: false, reason: 'discovery_failed: ' + e.message };
+  }
+  if (!cand.email) return { ok: false, reason: 'no_published_email_found' };
+  if (!isValidEmailFormat(cand.email)) return { ok: false, reason: 'invalid_format' };
+  const mxOk = await domainHasMx(cand.email);
+  if (!mxOk) return { ok: false, reason: 'no_mx_records' };
+
+  // Verified — safe to store.
+  await pool.query(
+    `UPDATE cg_prospects
+       SET email=$1, email_type=$2, email_verified=TRUE, email_source=$3
+     WHERE id=$4`,
+    [cand.email, cand.email_type, cand.email_source || '', p.id]
+  );
+  return { ok: true, email: cand.email, email_type: cand.email_type, email_source: cand.email_source };
+}
+
+// ── POST /api/cg/prospects/:id/find-email ─────────────────────────────────────
+// Discover + verify the best published email for ONE prospect and store it.
+router.post('/prospects/:id/find-email', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
+    const result = await findAndVerifyEmailFor(r.rows[0]);
+    const fresh = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [req.params.id]);
+    res.json({ result, prospect: fresh.rows[0] });
+  } catch (e) {
+    console.error('[cg/find-email]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/cg/find-missing-emails ──────────────────────────────────────────
+// Backfill: run discovery + verification for every prospect that does not yet
+// have a verified email. Existing rows fill in without re-finding everything.
+router.post('/find-missing-emails', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM cg_prospects
+        WHERE email_verified IS NOT TRUE
+          AND status NOT IN ('replied','converted','skipped')
+        ORDER BY created_at DESC`
+    );
+    const targets = r.rows;
+    let verified = 0;
+    let failed = 0;
+    const details = [];
+    for (const p of targets) {
+      const result = await findAndVerifyEmailFor(p);
+      if (result.ok) { verified++; details.push({ company: p.company, email: result.email, type: result.email_type }); }
+      else { failed++; details.push({ company: p.company, skipped: result.reason }); }
+    }
+    const all = await pool.query(`SELECT * FROM cg_prospects ORDER BY created_at DESC`);
+    res.json({ scanned: targets.length, verified, failed, details, prospects: all.rows });
+  } catch (e) {
+    console.error('[cg/find-missing-emails]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/cg/prospects ─────────────────────────────────────────────────────
 router.get('/prospects', async (req, res) => {
   try {
@@ -247,7 +398,8 @@ company, first_name, contact_name, contact_title, email, phone, website, has_web
             p.first_name || '',
             p.contact_name || '',
             p.contact_title || '',
-            p.email || '',
+            '', // email intentionally left blank — only a verified, published email
+                // (discovered + MX-checked via find-email) is ever stored.
             p.phone || '',
             p.website || '',
             hasSite,
@@ -302,6 +454,10 @@ router.post('/prospects/:id/approve', async (req, res) => {
     const r = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
     const prospect = r.rows[0];
+
+    if (!prospect.email_verified || !prospect.email) {
+      return res.status(400).json({ error: 'No verified email. Run "Find email" to discover and verify a real address before approving.' });
+    }
 
     if (!prospect.drafted || !prospect.draft_email1_body) {
       return res.status(400).json({ error: 'Draft the 3 emails and review them before approving.' });
@@ -572,6 +728,12 @@ router.post('/run-outreach', async (req, res) => {
       // Safety: never send to a prospect who has replied or been marked done.
       if (['replied', 'converted', 'skipped'].includes(p.status)) continue;
 
+      // Hard gate: never send without a real, verified email. No self-fallback.
+      if (!p.email_verified || !p.email || !EMAIL_RX.test(String(p.email).trim())) {
+        errors.push({ company: p.company, error: 'Skipped — no verified email' });
+        continue;
+      }
+
       // Per-prospect drafted emails are the source of truth (review-before-send).
       // Determine which email to send + the timing gate.
       let emailNum = null;
@@ -625,7 +787,7 @@ ${personalBody.replace(/\n/g, '<br>')}
   <a href="https://comptongroupllc.com" style="color:#c9a84c">comptongroupllc.com</a>
 </p>
 </div>`;
-        await sendEmail(p.email || FROM_EMAIL, personalSubject, html); // fallback to self if no email
+        await sendEmail(p.email, personalSubject, html); // verified email guaranteed by the gate above
 
         // Log the send
         await pool.query(

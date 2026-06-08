@@ -1160,7 +1160,10 @@ button,input,select,textarea{font-family:inherit}
       <div class="ag-section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <div class="ag-section-title" style="margin-bottom:0">All Prospects</div>
-          <button class="ag-btn" onclick="loadProspects()" style="font-size:11px;padding:6px 12px">↻ Refresh</button>
+          <div style="display:flex;gap:8px">
+            <button class="ag-btn ag-btn-blue" id="find-missing-emails-btn" onclick="findMissingEmails()" style="font-size:11px;padding:6px 12px">✉️ Find missing emails</button>
+            <button class="ag-btn" onclick="loadProspects()" style="font-size:11px;padding:6px 12px">↻ Refresh</button>
+          </div>
         </div>
         <div class="ag-table-wrap">
           <table class="ag-table">
@@ -1168,6 +1171,7 @@ button,input,select,textarea{font-family:inherit}
               <tr>
                 <th>Company</th>
                 <th>City</th>
+                <th>Email</th>
                 <th>Phone</th>
                 <th>Site</th>
                 <th>Booking</th>
@@ -1178,7 +1182,7 @@ button,input,select,textarea{font-family:inherit}
               </tr>
             </thead>
             <tbody id="prospects-tbody">
-              <tr><td colspan="9" class="ag-empty">Loading prospects…</td></tr>
+              <tr><td colspan="10" class="ag-empty">Loading prospects…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1539,7 +1543,7 @@ async function loadProspects() {
     const prospects = await r.json();
     window._prospects = prospects;
     if (!prospects.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="ag-empty">No prospects yet. Use "Find Prospects" above to get started.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="ag-empty">No prospects yet. Use "Find Prospects" above to get started.</td></tr>';
       return;
     }
     const yn = (v) => v === true ? '<span style="color:#4ade80">yes</span>' : v === false ? '<span style="color:#7a7a90">no</span>' : '<span style="color:#555570">—</span>';
@@ -1547,10 +1551,13 @@ async function loadProspects() {
       const rating = p.google_rating != null
         ? `★ ${p.google_rating}${p.review_count != null ? ` <span style="color:#7a7a90">(${p.review_count})</span>` : ''}`
         : '<span style="color:#555570">—</span>';
+      const emailCell = emailCellHtml(p);
+      const verified = p.email_verified === true && p.email;
       return `
       <tr>
         <td><strong style="color:#f0f0f5">${esc(p.company)}</strong>${p.first_name ? `<br><span style="color:#555570;font-size:10px">${esc(p.first_name)}</span>` : ''}</td>
         <td style="font-size:11px">${esc(p.city)}</td>
+        <td style="font-size:11px">${emailCell}</td>
         <td style="font-size:11px">${esc(p.phone) || '<span style="color:#555570">—</span>'}</td>
         <td style="font-size:11px">${yn(p.has_website)}</td>
         <td style="font-size:11px">${yn(p.online_booking)}</td>
@@ -1559,17 +1566,35 @@ async function loadProspects() {
         <td>${statusBadge(p.status)}${p.drafted ? '<br><span style="font-size:9px;color:#4ade80">drafted</span>' : ''}</td>
         <td>
           <div class="ag-row-actions">
+            <button class="ag-btn" onclick="findEmail(${p.id})" style="font-size:11px;padding:5px 10px">${verified ? '↻ Re-find email' : '✉️ Find email'}</button>
             <button class="ag-btn" onclick="draftProspect(${p.id})" style="font-size:11px;padding:5px 10px">${p.drafted ? '↻ Redraft' : '⚡ Draft'}</button>
             ${p.drafted ? `<button class="ag-btn ag-btn-blue" onclick="openPreview(${p.id})" style="font-size:11px;padding:5px 10px">Preview</button>` : ''}
-            ${p.status === 'pending' && p.drafted ? `<button class="ag-btn ag-btn-green" onclick="approveProspect(${p.id})" style="font-size:11px;padding:5px 10px">Approve</button>` : ''}
+            ${p.status === 'pending' && p.drafted && verified ? `<button class="ag-btn ag-btn-green" onclick="approveProspect(${p.id})" style="font-size:11px;padding:5px 10px">Approve</button>` : ''}
             <button class="ag-btn ag-btn-danger" onclick="skipProspect(${p.id})" style="font-size:11px;padding:5px 10px">Skip</button>
           </div>
         </td>
       </tr>`;
     }).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" class="ag-empty">Error loading prospects: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="ag-empty">Error loading prospects: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// Render the Email cell: verified email + a quality tag (owner/role/generic),
+// or a clear "no email" prompt so contact quality is visible at a glance.
+function emailCellHtml(p) {
+  if (p.email_verified === true && p.email) {
+    const tagColors = {
+      owner:   'background:rgba(74,222,128,0.15);color:#4ade80;border:1px solid rgba(74,222,128,0.3)',
+      role:    'background:rgba(201,168,76,0.15);color:#c9a84c;border:1px solid rgba(201,168,76,0.3)',
+      generic: 'background:rgba(120,120,144,0.15);color:#9a9ab0;border:1px solid rgba(120,120,144,0.3)',
+    };
+    const type = ['owner','role','generic'].includes(p.email_type) ? p.email_type : 'generic';
+    const tag = `<span style="font-size:9px;padding:1px 6px;border-radius:8px;margin-left:5px;${tagColors[type]}">${type}</span>`;
+    const src = p.email_source ? ` title="Source: ${esc(p.email_source)}"` : '';
+    return `<span${src} style="color:#d8d8e0">${esc(p.email)}</span>${tag} <span style="color:#4ade80" title="Verified (format + MX)">✓</span>`;
+  }
+  return '<span style="color:#7a7a90;font-style:italic">no email — call/contact form</span>';
 }
 
 // Gather selected category keys from the Find UI (default home_services).
@@ -1577,6 +1602,41 @@ function getSelectedCategories() {
   const boxes = document.querySelectorAll('.cat-group input[type=checkbox]:checked');
   const keys = Array.from(boxes).map(b => b.value);
   return keys.length ? keys : ['home_services'];
+}
+
+// ── Email discovery + verification ──────────────────────────────────────────
+async function findEmail(id) {
+  showToast('Searching the web for a verified email…');
+  try {
+    const r = await fetch(`/api/cg/prospects/${id}/find-email`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { showToast(`Error: ${data.error}`, true); return; }
+    if (data.result && data.result.ok) {
+      showToast(`Verified ${data.result.email_type} email found`);
+    } else {
+      const reason = (data.result && data.result.reason) || 'no published email found';
+      showToast(`No verified email: ${reason}`, true);
+    }
+    await loadProspects();
+  } catch (e) { showToast(`Error: ${e.message}`, true); }
+}
+
+async function findMissingEmails() {
+  const btn = document.getElementById('find-missing-emails-btn');
+  const original = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '✉️ Searching…'; }
+  showToast('Finding + verifying emails for all prospects missing one…');
+  try {
+    const r = await fetch('/api/cg/find-missing-emails', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { showToast(`Error: ${data.error}`, true); return; }
+    showToast(`Scanned ${data.scanned} · ${data.verified} verified · ${data.failed} without a real email`);
+    await loadProspects();
+  } catch (e) {
+    showToast(`Error: ${e.message}`, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = original; }
+  }
 }
 
 // ── Per-prospect AI drafting + preview/edit (review-before-send) ─────────────
