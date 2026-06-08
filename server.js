@@ -99,6 +99,27 @@ app.listen(PORT, async () => {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    // Local-targeting + per-prospect signal columns + per-prospect drafted emails.
+    // Added via ALTER ... IF NOT EXISTS so existing rows/databases upgrade in place.
+    await pool.query(`
+      ALTER TABLE cg_prospects
+        ADD COLUMN IF NOT EXISTS first_name TEXT,
+        ADD COLUMN IF NOT EXISTS city TEXT,
+        ADD COLUMN IF NOT EXISTS metro TEXT,
+        ADD COLUMN IF NOT EXISTS phone TEXT,
+        ADD COLUMN IF NOT EXISTS has_website BOOLEAN,
+        ADD COLUMN IF NOT EXISTS online_booking BOOLEAN,
+        ADD COLUMN IF NOT EXISTS google_rating NUMERIC(2,1),
+        ADD COLUMN IF NOT EXISTS review_count INTEGER,
+        ADD COLUMN IF NOT EXISTS category TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email1_subject TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email1_body TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email2_subject TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email2_body TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email3_subject TEXT,
+        ADD COLUMN IF NOT EXISTS draft_email3_body TEXT,
+        ADD COLUMN IF NOT EXISTS drafted BOOLEAN DEFAULT FALSE
+    `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cg_sequences (
         id SERIAL PRIMARY KEY,

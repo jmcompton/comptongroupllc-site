@@ -13,7 +13,57 @@ function getAI()     { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_
 
 const MODEL      = 'claude-sonnet-4-20250514';
 const FROM_EMAIL = process.env.SENDER_EMAIL || 'john@comptongroupllc.com';
-const DAILY_LIMIT = 20;
+const DAILY_LIMIT = 10; // warmup default; adjustable per-run via run-outreach body.limit
+
+// ── Local targeting config ───────────────────────────────────────────────────
+// Prospect discovery is constrained to these two metros + surrounding suburbs.
+// Anything outside is rejected at insert time.
+const TARGET_METROS = {
+  atlanta: {
+    label: 'Atlanta, GA metro',
+    state: 'GA',
+    // Representative metro/suburb cities used to validate a prospect's location.
+    cities: ['atlanta','marietta','alpharetta','roswell','sandy springs','smyrna','dunwoody',
+      'decatur','kennesaw','duluth','lawrenceville','suwanee','johns creek','peachtree corners',
+      'norcross','tucker','stone mountain','douglasville','woodstock','canton','acworth','cumming',
+      'snellville','stockbridge','mcdonough','newnan','peachtree city','fayetteville','conyers',
+      'lithonia','college park','east point','austell','powder springs','buford','sugar hill',
+      'mableton','grayson','loganville','dallas','hiram','villa rica','union city','hampton',
+      'jonesboro','riverdale','forest park','morrow','ellenwood','clarkston','chamblee','brookhaven','vinings'],
+  },
+  birmingham: {
+    label: 'Birmingham, AL metro',
+    state: 'AL',
+    cities: ['birmingham','hoover','vestavia hills','mountain brook','homewood','trussville',
+      'bessemer','hueytown','pelham','alabaster','helena','gardendale','fultondale','irondale',
+      'leeds','moody','pell city','chelsea','calera','clay','pinson','center point','mccalla',
+      'springville','warrior','fairfield','tarrant','midfield','adamsville','columbiana','montevallo'],
+  },
+};
+
+// Business categories the finder targets. Admin picks one or more; default = all Home Services.
+const PROSPECT_CATEGORIES = {
+  home_services: {
+    label: 'Home Services',
+    types: ['HVAC','plumbing','roofing','landscaping','electrical','garage doors','pest control'],
+  },
+  local_professional: {
+    label: 'Local Professional Services',
+    types: ['dental','chiropractic','law firms','real estate','med spas','accounting'],
+  },
+};
+
+// Returns the metro key for a given city/state, or null if outside both metros.
+function resolveMetro(city, state) {
+  const c = (city || '').toLowerCase().trim();
+  const s = (state || '').toUpperCase().trim();
+  for (const [key, m] of Object.entries(TARGET_METROS)) {
+    if (m.cities.includes(c)) return key;
+    // Fallback: allow city match even if state string is messy, but if state is given it must match.
+    if (m.cities.some(city2 => c.includes(city2)) && (!s || s === m.state)) return key;
+  }
+  return null;
+}
 
 // ── Microsoft Graph email transport (app-only / client credentials) ──────────
 // Sends real mail through Microsoft 365 as SENDER_EMAIL. All credentials come
@@ -106,18 +156,48 @@ router.get('/prospects', async (req, res) => {
 });
 
 // ── POST /api/cg/find-prospects ───────────────────────────────────────────────
+// Local targeting: constrained to the Atlanta, GA and Birmingham, AL metros.
+// Body: { categories?: string[], description?: string }
+//   categories = keys from PROSPECT_CATEGORIES (default ['home_services']).
+//   description = optional free-text refinement appended to the search.
 router.post('/find-prospects', async (req, res) => {
-  const { description } = req.body;
-  if (!description || !description.trim()) {
-    return res.status(400).json({ error: 'description is required' });
-  }
+  // Resolve requested categories → list of business types. Default = all Home Services.
+  let categoryKeys = Array.isArray(req.body.categories) ? req.body.categories : [];
+  categoryKeys = categoryKeys.filter(k => PROSPECT_CATEGORIES[k]);
+  if (!categoryKeys.length) categoryKeys = ['home_services'];
+  const typeList = categoryKeys.flatMap(k => PROSPECT_CATEGORIES[k].types);
+  const categoryLabels = categoryKeys.map(k => PROSPECT_CATEGORIES[k].label).join(' and ');
 
-  const userPrompt = `Search the web and find 15 small to mid-size businesses matching this description: ${description.trim()}
+  const refinement = (req.body.description || '').trim();
+  const metroList = Object.values(TARGET_METROS).map(m => m.label).join(' and ');
 
-For each company return: company name, primary contact name and title, email address, website, industry, estimated revenue range, current software/tech stack if findable, and ONE specific reason why Compton Group LLC (a custom AI software development company) could help them.
+  const userPrompt = `Search the web and find 15 small, local, owner-operated businesses ONLY in the ${metroList} (including surrounding suburbs).
 
-Return as a JSON array only, no preamble or markdown. Each element should have these exact keys:
-company, contact_name, contact_title, email, website, industry, revenue_range, tech_stack, ai_opportunity`;
+Target these business types: ${typeList.join(', ')}.${refinement ? `\nAdditional refinement: ${refinement}` : ''}
+
+Hard rules:
+- ONLY businesses physically located in the Atlanta, GA metro or the Birmingham, AL metro (or their suburbs). Do NOT return businesses anywhere else.
+- Prefer small local shops over big regional chains or franchises.
+
+For each business capture these signals (they drive email personalization):
+- company: business name
+- first_name: the owner/primary contact's FIRST name only if findable, else ""
+- contact_name: full contact name if findable, else ""
+- contact_title: their title/role, else ""
+- email: a real contact email if findable, else ""
+- phone: main phone number if findable, else ""
+- website: full website URL if they have one, else ""
+- has_website: true if they have a real website, else false
+- online_booking: true if their site offers online booking/scheduling, else false
+- google_rating: their Google star rating as a number (e.g. 4.7) if findable, else null
+- review_count: their Google review count as an integer if findable, else null
+- city: the city they're located in
+- state: "GA" or "AL"
+- industry: the specific business type (e.g. "HVAC", "dental")
+- ai_opportunity: ONE specific, concrete AI idea that would help THIS business based on its signals
+
+Return a JSON array ONLY, no preamble or markdown. Each element must have exactly these keys:
+company, first_name, contact_name, contact_title, email, phone, website, has_website, online_booking, google_rating, review_count, city, state, industry, ai_opportunity`;
 
   try {
     const response = await getAI().messages.create({
@@ -145,24 +225,39 @@ company, contact_name, contact_title, email, website, industry, revenue_range, t
       return res.status(500).json({ error: 'AI returned unparseable JSON' });
     }
 
-    // Insert into DB, skip duplicates by email
+    // Insert into DB, skip duplicates by email. Reject anything outside the metros.
     let inserted = 0;
+    let rejected = 0;
+    const categoryLabelForRow = categoryLabels;
     for (const p of prospects) {
       if (!p.company) continue;
+      const metro = resolveMetro(p.city, p.state);
+      if (!metro) { rejected++; continue; } // outside Atlanta/Birmingham → reject
       try {
+        const hasSite = p.has_website != null ? !!p.has_website : !!(p.website && p.website.trim());
         await pool.query(
           `INSERT INTO cg_prospects
-             (company, contact_name, contact_title, email, website, industry, revenue_range, ai_opportunity, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
+             (company, first_name, contact_name, contact_title, email, phone, website,
+              has_website, online_booking, google_rating, review_count,
+              city, metro, industry, category, ai_opportunity, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'pending')
            ON CONFLICT DO NOTHING`,
           [
             p.company || '',
+            p.first_name || '',
             p.contact_name || '',
             p.contact_title || '',
             p.email || '',
+            p.phone || '',
             p.website || '',
+            hasSite,
+            p.online_booking != null ? !!p.online_booking : false,
+            (p.google_rating != null && !isNaN(parseFloat(p.google_rating))) ? parseFloat(p.google_rating) : null,
+            (p.review_count != null && !isNaN(parseInt(p.review_count))) ? parseInt(p.review_count) : null,
+            p.city || '',
+            metro,
             p.industry || '',
-            p.revenue_range || '',
+            categoryLabelForRow,
             p.ai_opportunity || '',
           ]
         );
@@ -173,7 +268,7 @@ company, contact_name, contact_title, email, website, industry, revenue_range, t
     }
 
     const all = await pool.query(`SELECT * FROM cg_prospects ORDER BY created_at DESC`);
-    res.json({ inserted, prospects: all.rows });
+    res.json({ inserted, rejected, prospects: all.rows });
   } catch (e) {
     console.error('[cg/find-prospects]', e.message);
     res.status(500).json({ error: e.message });
@@ -200,37 +295,21 @@ router.patch('/prospects/:id/status', async (req, res) => {
 });
 
 // ── POST /api/cg/prospects/:id/approve ───────────────────────────────────────
-// Approve a prospect + auto-select sequence type using AI
+// Approve a prospect for send. Requires drafted emails to exist (review-before-send),
+// so nothing can be queued for sending until the admin has reviewed the drafts.
 router.post('/prospects/:id/approve', async (req, res) => {
   try {
     const r = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
     const prospect = r.rows[0];
 
-    // Quick AI call to pick sequence type
-    let sequenceType = 'efficiency'; // default
-    try {
-      const msg = await getAI().messages.create({
-        model: MODEL,
-        max_tokens: 50,
-        messages: [{
-          role: 'user',
-          content: `Based on this AI opportunity for a prospect: "${prospect.ai_opportunity}" and their industry: "${prospect.industry}", which outreach angle is best?
-Options (reply with ONLY the option key, nothing else):
-- efficiency (they waste time on manual processes)
-- replace_software (they use outdated/legacy software)
-- add_ai (they're doing well but not using AI yet)`,
-        }],
-      });
-      const text = msg.content[0]?.text?.trim().toLowerCase() || '';
-      if (text.includes('replace_software') || text.includes('replace')) sequenceType = 'replace_software';
-      else if (text.includes('add_ai') || text.includes('add')) sequenceType = 'add_ai';
-      else sequenceType = 'efficiency';
-    } catch (_) { /* use default */ }
+    if (!prospect.drafted || !prospect.draft_email1_body) {
+      return res.status(400).json({ error: 'Draft the 3 emails and review them before approving.' });
+    }
 
     const updated = await pool.query(
-      `UPDATE cg_prospects SET status='approved', sequence_type=$1 WHERE id=$2 RETURNING *`,
-      [sequenceType, req.params.id]
+      `UPDATE cg_prospects SET status='approved' WHERE id=$1 RETURNING *`,
+      [req.params.id]
     );
     res.json(updated.rows[0]);
   } catch (e) {
@@ -320,6 +399,134 @@ router.post('/draft-sequence', async (req, res) => {
   }
 });
 
+// ── POST /api/cg/prospects/:id/draft ─────────────────────────────────────────
+// Generate a personalized 3-email sequence for ONE prospect in JohnMark's voice,
+// using the prospect's captured signals. Stores into the draft_* columns and
+// marks drafted=true. Does NOT send — admin reviews/edits/approves first.
+const DRAFT_SYSTEM_PROMPT = `You write cold outreach emails for JohnMark, who runs a small software company (Compton Group LLC) in the Atlanta–Birmingham area building simple AI tools for local businesses.
+
+HARD RULES:
+- Short, plain-text emails that sound like a real person typed them fast.
+- Use contractions. First person. Sign as "JohnMark".
+- NO markdown. NO buzzwords (never "solutions", "leverage", "cutting-edge", "revolutionize"). NO corporate tone. No "I hope this email finds you well."
+- One link max (and usually none).
+- Email 1 must be under ~90 words.
+- The offer is ALWAYS a FREE, no-pressure look — a quick 15-min call OR a local in-person visit — where JohnMark shows one specific AI idea for their business.
+- NEVER pitch "custom software" and NEVER mention a price.
+
+Use these EXACT templates, filling {{...}} per the prospect:
+
+EMAIL 1 (opener)
+Subject: quick AI idea for {{business_name}}
+Hey {{first_name}},
+I'm JohnMark — I run a small software company in the Atlanta–Birmingham area and I build simple AI tools for local businesses.
+I was checking out {{business_name}} and noticed {{observation}}. There's a quick AI setup that could {{benefit}} — and most shops your size aren't using it yet, so it's an easy edge.
+I'm not pitching some big expensive project. I'd just show you exactly what it'd look like for your business on a quick 15-min call, or swing by since I'm local. Free, no pressure.
+Worth a look?
+JohnMark
+Compton Group LLC
+
+EMAIL 2 (bump)
+Subject: re: quick AI idea for {{business_name}}
+Hey {{first_name}} — bumping this in case it slipped by.
+If a call feels like a lot, I can just put together a quick 2-minute example of what the setup would do for {{business_name}} and send it over. No meeting needed — just reply "send it" and I will.
+JohnMark
+
+EMAIL 3 (close)
+Subject: re: quick AI idea for {{business_name}}
+Hey {{first_name}}, I'll leave it here so I'm not cluttering your inbox.
+If {{pain}} ever becomes worth fixing, just reply and I'll show you what's possible — free either way. Best of luck with {{business_name}}.
+JohnMark
+
+PERSONALIZATION — pick the most relevant {{observation}}, {{benefit}}, {{pain}} from the prospect's signals/category:
+- No online booking → observation: "you don't have an easy way for customers to book online"; benefit: "let people book jobs right from their phone, day or night"; pain: "missed bookings"
+- Phone-only / no booking + service trade → observation: "it looks like everything runs through phone calls"; benefit: "instantly text back the calls you miss so you stop losing jobs"; pain: "missed calls"
+- Strong reviews but weak/no website → observation: "you've got great reviews but not much of a web presence"; benefit: "turn that reputation into more booked jobs automatically"; pain: "leads slipping through"
+You may adapt the wording slightly to fit the business, but keep the voice and structure.
+{{first_name}}: use the contact's first name; if unknown, use a natural greeting ("Hey there") or the business name.
+
+Return JSON ONLY, no markdown, with exactly these keys:
+{"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`;
+
+router.post('/prospects/:id/draft', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
+    const p = r.rows[0];
+
+    const signals = [
+      `Business name: ${p.company || ''}`,
+      `Contact first name: ${p.first_name || '(unknown)'}`,
+      `Category: ${p.category || ''}`,
+      `Industry/type: ${p.industry || ''}`,
+      `City: ${p.city || ''} (${p.metro || ''} metro)`,
+      `Phone: ${p.phone || '(unknown)'}`,
+      `Has website: ${p.has_website ? 'yes' : 'no'}`,
+      `Online booking: ${p.online_booking ? 'yes' : 'no'}`,
+      `Google rating: ${p.google_rating != null ? p.google_rating : '(unknown)'}`,
+      `Review count: ${p.review_count != null ? p.review_count : '(unknown)'}`,
+      `Noted AI opportunity: ${p.ai_opportunity || '(none)'}`,
+    ].join('\n');
+
+    const msg = await getAI().messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      system: DRAFT_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Write the 3-email sequence for this prospect using their signals:\n\n${signals}`,
+      }],
+    });
+
+    let seq = {};
+    try {
+      const match = (msg.content[0]?.text || '').match(/\{[\s\S]*\}/);
+      if (match) seq = JSON.parse(match[0]);
+    } catch (parseErr) {
+      return res.status(500).json({ error: 'AI returned unparseable JSON' });
+    }
+
+    const updated = await pool.query(
+      `UPDATE cg_prospects SET
+         draft_email1_subject=$1, draft_email1_body=$2,
+         draft_email2_subject=$3, draft_email2_body=$4,
+         draft_email3_subject=$5, draft_email3_body=$6,
+         drafted=TRUE
+       WHERE id=$7 RETURNING *`,
+      [seq.email1_subject || '', seq.email1_body || '',
+       seq.email2_subject || '', seq.email2_body || '',
+       seq.email3_subject || '', seq.email3_body || '', req.params.id]
+    );
+    res.json(updated.rows[0]);
+  } catch (e) {
+    console.error('[cg/prospects/draft]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── PUT /api/cg/prospects/:id/drafts ─────────────────────────────────────────
+// Admin saves edited drafts (review-before-send). Keeps drafted=true.
+router.put('/prospects/:id/drafts', async (req, res) => {
+  const b = req.body || {};
+  try {
+    const updated = await pool.query(
+      `UPDATE cg_prospects SET
+         draft_email1_subject=$1, draft_email1_body=$2,
+         draft_email2_subject=$3, draft_email2_body=$4,
+         draft_email3_subject=$5, draft_email3_body=$6,
+         drafted=TRUE
+       WHERE id=$7 RETURNING *`,
+      [b.email1_subject || '', b.email1_body || '',
+       b.email2_subject || '', b.email2_body || '',
+       b.email3_subject || '', b.email3_body || '', req.params.id]
+    );
+    if (!updated.rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(updated.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/cg/outreach-log ──────────────────────────────────────────────────
 router.get('/outreach-log', async (req, res) => {
   try {
@@ -339,17 +546,18 @@ router.get('/outreach-log', async (req, res) => {
 // Sends next email in sequence for all approved prospects (up to DAILY_LIMIT)
 router.post('/run-outreach', async (req, res) => {
   try {
-    // Load sequences
-    const seqR = await pool.query(`SELECT * FROM cg_sequences`);
-    const seqMap = {};
-    for (const s of seqR.rows) seqMap[s.sequence_type] = s;
+    // Daily send cap — default 10 (warmup), adjustable per run from the UI.
+    let limit = parseInt(req.body && req.body.limit);
+    if (!Number.isFinite(limit) || limit < 1) limit = DAILY_LIMIT;
+    if (limit > 100) limit = 100;
 
-    // Get approved prospects
+    // Get prospects mid-sequence. Replied/converted/skipped are excluded so we
+    // never email a prospect who has already replied or been marked done.
     const prospectsR = await pool.query(`
       SELECT * FROM cg_prospects
       WHERE status IN ('approved','sent_1','sent_2')
       LIMIT $1
-    `, [DAILY_LIMIT]);
+    `, [limit]);
 
     const prospects = prospectsR.rows;
     if (!prospects.length) {
@@ -361,13 +569,11 @@ router.post('/run-outreach', async (req, res) => {
     const now = new Date();
 
     for (const p of prospects) {
-      const seq = seqMap[p.sequence_type || 'efficiency'];
-      if (!seq) {
-        errors.push({ company: p.company, error: 'No sequence configured' });
-        continue;
-      }
+      // Safety: never send to a prospect who has replied or been marked done.
+      if (['replied', 'converted', 'skipped'].includes(p.status)) continue;
 
-      // Determine which email to send
+      // Per-prospect drafted emails are the source of truth (review-before-send).
+      // Determine which email to send + the timing gate.
       let emailNum = null;
       let subject  = null;
       let body     = null;
@@ -375,44 +581,39 @@ router.post('/run-outreach', async (req, res) => {
 
       if (p.status === 'approved') {
         emailNum  = 1;
-        subject   = seq.email1_subject;
-        body      = seq.email1_body;
+        subject   = p.draft_email1_subject;
+        body      = p.draft_email1_body;
         newStatus = 'sent_1';
       } else if (p.status === 'sent_1') {
-        // Send email 2 only if 5+ days since email 1
+        // Send email 2 only if ~3+ days since email 1
         const daysSince = p.email1_sent_at
           ? (now - new Date(p.email1_sent_at)) / 86400000
           : 99;
-        if (daysSince < 5) continue;
+        if (daysSince < 3) continue;
         emailNum  = 2;
-        subject   = seq.email2_subject;
-        body      = seq.email2_body;
+        subject   = p.draft_email2_subject;
+        body      = p.draft_email2_body;
         newStatus = 'sent_2';
       } else if (p.status === 'sent_2') {
-        // Send email 3 only if 12+ days since email 1
-        const daysSince = p.email1_sent_at
-          ? (now - new Date(p.email1_sent_at)) / 86400000
+        // Send email 3 only if ~4+ days since email 2
+        const daysSince = p.email2_sent_at
+          ? (now - new Date(p.email2_sent_at)) / 86400000
           : 99;
-        if (daysSince < 12) continue;
+        if (daysSince < 4) continue;
         emailNum  = 3;
-        subject   = seq.email3_subject;
-        body      = seq.email3_body;
+        subject   = p.draft_email3_subject;
+        body      = p.draft_email3_body;
         newStatus = 'sent_3';
       }
 
       if (!emailNum || !subject || !body) {
-        errors.push({ company: p.company, error: `No content for email ${emailNum}` });
+        errors.push({ company: p.company, error: `No drafted content for email ${emailNum}` });
         continue;
       }
 
-      // Personalize subject/body
-      const personalSubject = subject
-        .replace(/\{company\}/gi, p.company)
-        .replace(/\{contact\}/gi, p.contact_name || 'there');
-      const personalBody = body
-        .replace(/\{company\}/gi, p.company)
-        .replace(/\{contact\}/gi, p.contact_name || 'there')
-        .replace(/\{industry\}/gi, p.industry || 'your industry');
+      // Drafts are already personalized per prospect; send as-is.
+      const personalSubject = subject;
+      const personalBody = body;
 
       try {
         const html = `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">

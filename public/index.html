@@ -745,6 +745,13 @@ button,input,select,textarea{font-family:inherit}
   transition:.2s ease;
 }
 .ag-input:focus{border-color:rgba(201,168,76,0.3)}
+.cat-pill{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:6px 12px;font-size:12px;color:#d0d0da;cursor:pointer}
+.cat-pill input{accent-color:#c9a84c;margin:0}
+#preview-overlay{display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;padding:20px}
+#preview-overlay.active{display:flex}
+#preview-modal{background:#12121c;border:1px solid rgba(255,255,255,0.1);border-radius:14px;max-width:680px;width:100%;max-height:88vh;overflow-y:auto;padding:24px}
+.pv-slot{margin-bottom:16px}
+.pv-slot-label{font-size:12px;font-weight:700;color:#c9a84c;margin-bottom:6px}
 .ag-textarea{
   width:100%;
   background:#08080f;
@@ -1127,8 +1134,23 @@ button,input,select,textarea{font-family:inherit}
     <div class="admin-tab-panel active" id="tab-prospects">
       <div class="ag-section">
         <div class="ag-section-title">Find New Prospects</div>
+        <div style="font-size:11px;color:#7a7a90;margin-bottom:10px">Local targeting — Atlanta, GA &amp; Birmingham, AL metros only. Pick categories (default = all Home Services).</div>
+        <div style="display:flex;flex-wrap:wrap;gap:18px;margin-bottom:12px">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:#c9a84c;margin-bottom:6px">Home Services</div>
+            <div id="cat-home_services" class="cat-group" style="display:flex;flex-wrap:wrap;gap:6px">
+              <label class="cat-pill"><input type="checkbox" value="home_services" checked> Home Services <span style="color:#7a7a90">(HVAC, plumbing, roofing, landscaping, electrical, garage doors, pest control)</span></label>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:#c9a84c;margin-bottom:6px">Local Professional Services</div>
+            <div id="cat-local_professional" class="cat-group" style="display:flex;flex-wrap:wrap;gap:6px">
+              <label class="cat-pill"><input type="checkbox" value="local_professional"> Local Professional <span style="color:#7a7a90">(dental, chiropractic, law firms, real estate, med spas, accounting)</span></label>
+            </div>
+          </div>
+        </div>
         <div style="display:flex;gap:10px;align-items:center">
-          <input class="ag-input" id="prospect-search" placeholder='e.g. "regional law firms in the Southeast" or "auto dealerships over $5M revenue"' style="flex:1">
+          <input class="ag-input" id="prospect-search" placeholder='Optional refinement, e.g. "family-owned" or "near Marietta"' style="flex:1">
           <button class="ag-btn" id="find-prospects-btn" onclick="findProspects()">
             🔍 Find Prospects
           </button>
@@ -1145,17 +1167,18 @@ button,input,select,textarea{font-family:inherit}
             <thead>
               <tr>
                 <th>Company</th>
-                <th>Contact</th>
-                <th>Email</th>
+                <th>City</th>
+                <th>Phone</th>
+                <th>Site</th>
+                <th>Booking</th>
+                <th>Rating</th>
                 <th>Industry</th>
-                <th>Revenue</th>
-                <th>AI Opportunity</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="prospects-tbody">
-              <tr><td colspan="8" class="ag-empty">Loading prospects…</td></tr>
+              <tr><td colspan="9" class="ag-empty">Loading prospects…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1174,9 +1197,14 @@ button,input,select,textarea{font-family:inherit}
       <div class="run-bar">
         <div>
           <div style="font-size:13px;font-weight:600;color:#f0f0f5;margin-bottom:2px">Run Outreach</div>
-          <div class="run-msg">Sends next email in sequence for all approved prospects (up to 20/day)</div>
+          <div class="run-msg">Sends the next email for approved prospects. Replied/done are skipped.</div>
         </div>
-        <button class="ag-btn ag-btn-green" id="run-outreach-btn" onclick="runOutreach()">▶ Run Outreach Now</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:11px;color:#7a7a90">Daily cap
+            <input type="number" id="run-cap-input" value="10" min="1" max="100" style="width:60px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:6px 8px;color:#f0f0f5;font-size:12px;margin-left:4px">
+          </label>
+          <button class="ag-btn ag-btn-green" id="run-outreach-btn" onclick="runOutreach()">▶ Run Outreach Now</button>
+        </div>
       </div>
       <div class="run-bar" style="margin-top:12px">
         <div>
@@ -1235,6 +1263,42 @@ button,input,select,textarea{font-family:inherit}
 
   </div><!-- /admin-body -->
 </div><!-- /admin-overlay -->
+
+<!-- ── Preview / edit drafted emails (review-before-send) ── -->
+<div id="preview-overlay">
+  <div id="preview-modal" data-id="">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div id="preview-modal-title" style="font-size:15px;font-weight:700;color:#f0f0f5">Review emails</div>
+      <button class="ag-btn" onclick="closePreview()" style="font-size:11px;padding:5px 10px">✕ Close</button>
+    </div>
+    <div style="font-size:11px;color:#7a7a90;margin-bottom:16px">Edit the AI drafts below. Nothing sends until you approve.</div>
+    <div class="pv-slot">
+      <div class="pv-slot-label">Email 1 — Opener (Day 1)</div>
+      <label class="ag-label">Subject</label>
+      <input class="ag-input" id="pv-sub1" style="font-size:12px;padding:8px 10px">
+      <label class="ag-label" style="margin-top:6px">Body</label>
+      <textarea class="ag-textarea" id="pv-body1" style="min-height:130px"></textarea>
+    </div>
+    <div class="pv-slot">
+      <div class="pv-slot-label">Email 2 — Bump (~3 days later)</div>
+      <label class="ag-label">Subject</label>
+      <input class="ag-input" id="pv-sub2" style="font-size:12px;padding:8px 10px">
+      <label class="ag-label" style="margin-top:6px">Body</label>
+      <textarea class="ag-textarea" id="pv-body2" style="min-height:90px"></textarea>
+    </div>
+    <div class="pv-slot">
+      <div class="pv-slot-label">Email 3 — Close (~4 days after #2)</div>
+      <label class="ag-label">Subject</label>
+      <input class="ag-input" id="pv-sub3" style="font-size:12px;padding:8px 10px">
+      <label class="ag-label" style="margin-top:6px">Body</label>
+      <textarea class="ag-textarea" id="pv-body3" style="min-height:90px"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="ag-btn" onclick="savePreview(false)" style="font-size:12px">💾 Save Drafts</button>
+      <button class="ag-btn ag-btn-green" onclick="savePreview(true)" style="font-size:12px">✓ Save &amp; Approve</button>
+    </div>
+  </div>
+</div>
 
 <!-- ════════════════════════════════════════════════════════════
      HOMEPAGE JAVASCRIPT
@@ -1473,29 +1537,103 @@ async function loadProspects() {
   try {
     const r = await fetch('/api/cg/prospects');
     const prospects = await r.json();
+    window._prospects = prospects;
     if (!prospects.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="ag-empty">No prospects yet. Use "Find Prospects" above to get started.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="ag-empty">No prospects yet. Use "Find Prospects" above to get started.</td></tr>';
       return;
     }
-    tbody.innerHTML = prospects.map(p => `
+    const yn = (v) => v === true ? '<span style="color:#4ade80">yes</span>' : v === false ? '<span style="color:#7a7a90">no</span>' : '<span style="color:#555570">—</span>';
+    tbody.innerHTML = prospects.map(p => {
+      const rating = p.google_rating != null
+        ? `★ ${p.google_rating}${p.review_count != null ? ` <span style="color:#7a7a90">(${p.review_count})</span>` : ''}`
+        : '<span style="color:#555570">—</span>';
+      return `
       <tr>
-        <td><strong style="color:#f0f0f5">${esc(p.company)}</strong></td>
-        <td>${esc(p.contact_name)}<br><span style="color:#555570;font-size:10px">${esc(p.contact_title)}</span></td>
-        <td><a href="mailto:${esc(p.email)}" style="color:#c9a84c">${esc(p.email)}</a></td>
-        <td>${esc(p.industry)}</td>
-        <td style="font-size:11px">${esc(p.revenue_range)}</td>
-        <td style="max-width:220px;font-size:11px;color:#a0a0b0">${esc(p.ai_opportunity)}</td>
-        <td>${statusBadge(p.status)}</td>
+        <td><strong style="color:#f0f0f5">${esc(p.company)}</strong>${p.first_name ? `<br><span style="color:#555570;font-size:10px">${esc(p.first_name)}</span>` : ''}</td>
+        <td style="font-size:11px">${esc(p.city)}</td>
+        <td style="font-size:11px">${esc(p.phone) || '<span style="color:#555570">—</span>'}</td>
+        <td style="font-size:11px">${yn(p.has_website)}</td>
+        <td style="font-size:11px">${yn(p.online_booking)}</td>
+        <td style="font-size:11px">${rating}</td>
+        <td style="font-size:11px">${esc(p.industry)}</td>
+        <td>${statusBadge(p.status)}${p.drafted ? '<br><span style="font-size:9px;color:#4ade80">drafted</span>' : ''}</td>
         <td>
           <div class="ag-row-actions">
-            ${p.status === 'pending' ? `<button class="ag-btn ag-btn-blue" onclick="approveProspect(${p.id})" style="font-size:11px;padding:5px 10px">Approve</button>` : ''}
+            <button class="ag-btn" onclick="draftProspect(${p.id})" style="font-size:11px;padding:5px 10px">${p.drafted ? '↻ Redraft' : '⚡ Draft'}</button>
+            ${p.drafted ? `<button class="ag-btn ag-btn-blue" onclick="openPreview(${p.id})" style="font-size:11px;padding:5px 10px">Preview</button>` : ''}
+            ${p.status === 'pending' && p.drafted ? `<button class="ag-btn ag-btn-green" onclick="approveProspect(${p.id})" style="font-size:11px;padding:5px 10px">Approve</button>` : ''}
             <button class="ag-btn ag-btn-danger" onclick="skipProspect(${p.id})" style="font-size:11px;padding:5px 10px">Skip</button>
           </div>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="8" class="ag-empty">Error loading prospects: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="ag-empty">Error loading prospects: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// Gather selected category keys from the Find UI (default home_services).
+function getSelectedCategories() {
+  const boxes = document.querySelectorAll('.cat-group input[type=checkbox]:checked');
+  const keys = Array.from(boxes).map(b => b.value);
+  return keys.length ? keys : ['home_services'];
+}
+
+// ── Per-prospect AI drafting + preview/edit (review-before-send) ─────────────
+async function draftProspect(id) {
+  showToast('Drafting 3 emails with AI…');
+  try {
+    const r = await fetch(`/api/cg/prospects/${id}/draft`, { method: 'POST' });
+    const data = await r.json();
+    if (r.ok) {
+      await loadProspects();
+      openPreview(id);
+    } else {
+      showToast(`Error: ${data.error}`, true);
+    }
+  } catch (e) { showToast(`Error: ${e.message}`, true); }
+}
+
+function openPreview(id) {
+  const p = (window._prospects || []).find(x => x.id === id);
+  if (!p) { showToast('Prospect not found', true); return; }
+  document.getElementById('preview-modal-title').textContent = `Review emails — ${p.company}`;
+  document.getElementById('preview-modal').dataset.id = id;
+  [1,2,3].forEach(n => {
+    document.getElementById(`pv-sub${n}`).value  = p[`draft_email${n}_subject`] || '';
+    document.getElementById(`pv-body${n}`).value = p[`draft_email${n}_body`] || '';
+  });
+  document.getElementById('preview-overlay').classList.add('active');
+}
+function closePreview() { document.getElementById('preview-overlay').classList.remove('active'); }
+
+async function savePreview(approveAfter) {
+  const id = document.getElementById('preview-modal').dataset.id;
+  const body = {
+    email1_subject: document.getElementById('pv-sub1').value,
+    email1_body:    document.getElementById('pv-body1').value,
+    email2_subject: document.getElementById('pv-sub2').value,
+    email2_body:    document.getElementById('pv-body2').value,
+    email3_subject: document.getElementById('pv-sub3').value,
+    email3_body:    document.getElementById('pv-body3').value,
+  };
+  try {
+    const r = await fetch(`/api/cg/prospects/${id}/drafts`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) { const d = await r.json(); showToast(`Error: ${d.error}`, true); return; }
+    if (approveAfter) {
+      const ar = await fetch(`/api/cg/prospects/${id}/approve`, { method: 'POST' });
+      const ad = await ar.json();
+      if (!ar.ok) { showToast(`Error: ${ad.error}`, true); return; }
+      showToast('Saved & approved for send');
+    } else {
+      showToast('Drafts saved');
+    }
+    closePreview();
+    loadProspects();
+  } catch (e) { showToast(`Error: ${e.message}`, true); }
 }
 
 async function findProspects() {
@@ -1503,21 +1641,22 @@ async function findProspects() {
   const status = document.getElementById('find-status');
   const btn = document.getElementById('find-prospects-btn');
   const desc = input.value.trim();
-  if (!desc) { input.focus(); return; }
+  const categories = getSelectedCategories();
 
   btn.disabled = true;
   btn.innerHTML = '<span class="ag-spinner"></span> Searching…';
-  status.textContent = 'Asking AI to find prospects — this may take 30-60 seconds…';
+  status.textContent = 'Searching Atlanta & Birmingham metros — this may take 30-60 seconds…';
 
   try {
     const r = await fetch('/api/cg/find-prospects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: desc }),
+      body: JSON.stringify({ categories, description: desc }),
     });
     const data = await r.json();
     if (r.ok) {
-      status.innerHTML = `<span style="color:#4ade80">✓ Found ${data.prospects?.length || 0} prospects (${data.inserted} new added)</span>`;
+      const rej = data.rejected ? `, ${data.rejected} rejected (outside metro)` : '';
+      status.innerHTML = `<span style="color:#4ade80">✓ Added ${data.inserted} new prospect${data.inserted !== 1 ? 's' : ''}${rej}</span>`;
       loadProspects();
     } else {
       status.innerHTML = `<span style="color:#ff7070">Error: ${esc(data.error)}</span>`;
@@ -1537,7 +1676,7 @@ async function approveProspect(id) {
     if (r.ok) {
       loadProspects();
       loadLog();
-      showToast(`Approved — sequence: ${data.sequence_type || 'efficiency'}`);
+      showToast('Approved for send');
     } else {
       showToast(`Error: ${data.error}`, true);
     }
@@ -1730,8 +1869,13 @@ async function runOutreach() {
   const btn = document.getElementById('run-outreach-btn');
   btn.disabled = true;
   btn.textContent = '⏳ Sending…';
+  const limit = parseInt(document.getElementById('run-cap-input')?.value) || 10;
   try {
-    const r = await fetch('/api/cg/run-outreach', { method: 'POST' });
+    const r = await fetch('/api/cg/run-outreach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit }),
+    });
     const data = await r.json();
     if (r.ok) {
       showToast(`Sent ${data.sent} email${data.sent !== 1 ? 's' : ''}!`);
