@@ -47,7 +47,7 @@ app.post('/api/contact', async (req, res) => {
       const resend = new Resend(process.env.RESEND_API_KEY);
       await resend.emails.send({
         from: 'Compton Group <jmcompton04@gmail.com>',
-        to: 'jmcompton04@gmail.com',
+        to: 'john@comptongroupllc.com',
         subject: `[CGsite] Contact from ${name}: ${subject || 'General'}`,
         text: `Name: ${name}\nEmail: ${email}\nSubject: ${subject || 'General'}\n\n${message}`,
       });
