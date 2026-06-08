@@ -16,6 +16,17 @@ const MODEL      = 'claude-sonnet-4-20250514';
 const FROM_EMAIL = process.env.SENDER_EMAIL || 'john@comptongroupllc.com';
 const DAILY_LIMIT = 10; // warmup default; adjustable per-run via run-outreach body.limit
 
+// Physical mailing address for the CAN-SPAM compliance footer. Set MAILING_ADDRESS
+// in env once the real address is finalized; falls back to a clear placeholder.
+const MAILING_ADDRESS = process.env.MAILING_ADDRESS || 'Atlanta, GA';
+
+// Detects an opt-out / unsubscribe intent in a prospect's reply text.
+// Matches a standalone "stop" or any "unsubscribe" (case-insensitive).
+function isOptOutMessage(text) {
+  const t = String(text == null ? '' : text).toLowerCase();
+  return /\bstop\b/.test(t) || /unsubscribe/.test(t);
+}
+
 // ── Local targeting config ───────────────────────────────────────────────────
 // Prospect discovery is constrained to these two metros + surrounding suburbs.
 // Anything outside is rejected at insert time.
@@ -144,6 +155,16 @@ async function sendEmail(to, subject, bodyHtml) {
 
 let pool; // injected by server.js
 function setPool(p) { pool = p; }
+
+// Ensure the opt-out column exists (idempotent). Lets a prospect who replies
+// "STOP"/"unsubscribe" be flagged and permanently excluded from further sends,
+// without requiring a separate migration.
+let _optOutColReady = false;
+async function ensureOptOutColumn() {
+  if (_optOutColReady) return;
+  await pool.query(`ALTER TABLE cg_prospects ADD COLUMN IF NOT EXISTS opted_out BOOLEAN DEFAULT FALSE`);
+  _optOutColReady = true;
+}
 
 // ── Email discovery + verification ────────────────────────────────────────────
 // Find the single BEST real, PUBLISHED contact email for a business, then verify
@@ -702,16 +723,20 @@ router.get('/outreach-log', async (req, res) => {
 // Sends next email in sequence for all approved prospects (up to DAILY_LIMIT)
 router.post('/run-outreach', async (req, res) => {
   try {
+    await ensureOptOutColumn();
+
     // Daily send cap — default 10 (warmup), adjustable per run from the UI.
     let limit = parseInt(req.body && req.body.limit);
     if (!Number.isFinite(limit) || limit < 1) limit = DAILY_LIMIT;
     if (limit > 100) limit = 100;
 
-    // Get prospects mid-sequence. Replied/converted/skipped are excluded so we
-    // never email a prospect who has already replied or been marked done.
+    // Get prospects mid-sequence. Replied/converted/skipped and opted-out
+    // prospects are excluded so we never email someone who has replied, been
+    // marked done, or asked to stop.
     const prospectsR = await pool.query(`
       SELECT * FROM cg_prospects
       WHERE status IN ('approved','sent_1','sent_2')
+        AND opted_out IS NOT TRUE
       LIMIT $1
     `, [limit]);
 
@@ -725,8 +750,9 @@ router.post('/run-outreach', async (req, res) => {
     const now = new Date();
 
     for (const p of prospects) {
-      // Safety: never send to a prospect who has replied or been marked done.
+      // Safety: never send to a prospect who has replied, been marked done, or opted out.
       if (['replied', 'converted', 'skipped'].includes(p.status)) continue;
+      if (p.opted_out) continue;
 
       // Hard gate: never send without a real, verified email. No self-fallback.
       if (!p.email_verified || !p.email || !EMAIL_RX.test(String(p.email).trim())) {
@@ -785,6 +811,9 @@ ${personalBody.replace(/\n/g, '<br>')}
 <p style="font-size:11px;color:#6b7280">
   JohnMark Compton · Founder, Compton Group LLC<br>
   <a href="https://comptongroupllc.com" style="color:#c9a84c">comptongroupllc.com</a>
+</p>
+<p style="font-size:11px;color:#9ca3af;margin-top:6px">
+  Compton Group LLC · ${MAILING_ADDRESS} · Reply STOP to opt out.
 </p>
 </div>`;
         await sendEmail(p.email, personalSubject, html); // verified email guaranteed by the gate above
@@ -912,6 +941,44 @@ router.post('/test-email', async (req, res) => {
   } catch (e) {
     console.error('[cg/test-email]', e.message);
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── POST /api/cg/process-reply ────────────────────────────────────────────────
+// Record a prospect reply and honor opt-outs. If the reply text contains "STOP"
+// or "unsubscribe", the prospect is flagged opted_out and permanently excluded
+// from any further sends in run-outreach. Identify the prospect by id or email.
+// Body: { id?: number, email?: string, message: string }
+router.post('/process-reply', async (req, res) => {
+  try {
+    await ensureOptOutColumn();
+    const { id, email, message } = req.body || {};
+
+    let r;
+    if (id != null) {
+      r = await pool.query(`SELECT * FROM cg_prospects WHERE id=$1`, [id]);
+    } else if (email) {
+      r = await pool.query(`SELECT * FROM cg_prospects WHERE lower(email)=lower($1) ORDER BY created_at DESC LIMIT 1`, [String(email).trim()]);
+    } else {
+      return res.status(400).json({ error: 'Provide a prospect id or email' });
+    }
+    if (!r.rows.length) return res.status(404).json({ error: 'Prospect not found' });
+
+    const p = r.rows[0];
+    const optedOut = isOptOutMessage(message);
+
+    const updated = await pool.query(
+      `UPDATE cg_prospects
+         SET opted_out = $1,
+             status = CASE WHEN $1 THEN 'skipped' ELSE 'replied' END
+       WHERE id=$2 RETURNING *`,
+      [optedOut, p.id]
+    );
+
+    res.json({ opted_out: optedOut, prospect: updated.rows[0] });
+  } catch (e) {
+    console.error('[cg/process-reply]', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
