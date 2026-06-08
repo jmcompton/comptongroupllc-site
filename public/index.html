@@ -384,10 +384,16 @@ button,input,select,textarea{font-family:inherit}
 .whatwedo-lead strong{color:var(--white);font-weight:500}
 .do-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  grid-template-columns:repeat(3,1fr);
   gap:20px;
   margin-top:56px;
   text-align:left;
+}
+@media(max-width:900px){
+  .do-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:560px){
+  .do-grid{grid-template-columns:1fr}
 }
 .do-card{
   background:var(--card-bg);
@@ -1192,9 +1198,23 @@ button,input,select,textarea{font-family:inherit}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="2" stroke="#c9a84c" stroke-width="1.6"/><path d="M3 9h18M8 2v4M16 2v4" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round"/></svg>
       </div>
       <h3>A 24/7 assistant</h3>
-      <p>An assistant that handles scheduling and answers common customer questions around the clock — even when you're closed or on a job.</p>
+      <p>Handles scheduling and answers common customer questions around the clock — even when you're closed or out on a job.</p>
     </div>
     <div class="do-card reveal reveal-delay-3">
+      <div class="do-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 11l19-9-9 19-2-8-8-2z" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3>Capture every website lead</h3>
+      <p>Turn website visitors and form fills into booked jobs automatically — so no inquiry sits in an inbox until it goes cold.</p>
+    </div>
+    <div class="do-card reveal reveal-delay-1">
+      <div class="do-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#c9a84c" stroke-width="1.6"/><path d="M12 7v5l3 2" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3>Cut the no-shows</h3>
+      <p>Automated appointment and payment reminders so customers show up on time and pay on time — without you chasing anyone.</p>
+    </div>
+    <div class="do-card reveal reveal-delay-2">
       <div class="do-icon">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
@@ -1206,7 +1226,7 @@ button,input,select,textarea{font-family:inherit}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l2.4 5.4 5.6.6-4.2 3.8 1.2 5.6L12 20l-5 2.8 1.2-5.6L4 13.4l5.6-.6L12 2z" stroke="#c9a84c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h3>A custom tool for your work</h3>
-      <p>Whatever eats your time — quotes, intake, scheduling, data entry — we'll build a tool around how your business actually runs.</p>
+      <p>Whatever eats your time — quotes, intake, scheduling, data entry — built around how your business actually runs.</p>
     </div>
   </div>
 </section>
@@ -1305,13 +1325,10 @@ button,input,select,textarea{font-family:inherit}
     <div class="form-group">
       <label class="form-label" for="f-subject">Subject</label>
       <select class="form-select" id="f-subject" name="subject">
-        <option value="">Select a topic</option>
-        <option value="Partnership">Partnership Inquiry</option>
-        <option value="Custom Software">Custom Software Development</option>
-        <option value="NILDash">NILDash Platform</option>
-        <option value="RepMatchPro">RepMatchPro Platform</option>
-        <option value="RepRoute">RepRoute Platform</option>
-        <option value="Other">Other</option>
+        <option value="I want a free AI audit" selected>I want a free AI audit</option>
+        <option value="I have a project in mind">I have a project in mind</option>
+        <option value="Just have a question">Just have a question</option>
+        <option value="Something else">Something else</option>
       </select>
     </div>
     <div class="form-group">

@@ -24,6 +24,13 @@ const cgRoutes = require('./server/routes/cg-outreach');
 cgRoutes.setPool(pool);
 app.use('/api/cg', cgRoutes.router);
 
+// Escape user-supplied text before embedding in the notification HTML.
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ── Contact form ──────────────────────────────────────────────────────────────
 app.post('/api/contact', async (req, res) => {
   try {
@@ -41,17 +48,21 @@ app.post('/api/contact', async (req, res) => {
       );
     } catch (_) { /* table may not exist yet — ignore */ }
 
-    // Optionally send via Resend
+    // Notify John via Microsoft Graph (reuses the existing sendEmail transport).
     try {
-      const { Resend } = require('resend');
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      await resend.emails.send({
-        from: 'Compton Group <jmcompton04@gmail.com>',
-        to: 'john@comptongroupllc.com',
-        subject: `[CGsite] Contact from ${name}: ${subject || 'General'}`,
-        text: `Name: ${name}\nEmail: ${email}\nSubject: ${subject || 'General'}\n\n${message}`,
-      });
-    } catch (_) { /* email optional */ }
+      const subj = subject || 'General';
+      const notifyHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">
+  <p style="font-size:15px;font-weight:600;margin:0 0 16px">New contact-form submission from comptongroupllc.com</p>
+  <p style="margin:0 0 6px"><strong>Name:</strong> ${escapeHtml(name)}</p>
+  <p style="margin:0 0 6px"><strong>Email:</strong> <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></p>
+  <p style="margin:0 0 6px"><strong>Subject:</strong> ${escapeHtml(subj)}</p>
+  <p style="margin:16px 0 6px"><strong>Message:</strong></p>
+  <p style="white-space:pre-wrap;background:#f5f5f7;border-radius:8px;padding:14px;margin:0">${escapeHtml(message)}</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+  <p style="font-size:11px;color:#6b7280">Reply directly to ${escapeHtml(email)} to respond.</p>
+</div>`;
+      await cgRoutes.sendEmail('john@comptongroupllc.com', `[CGsite] Contact from ${name}: ${subj}`, notifyHtml);
+    } catch (e) { console.warn('[contact] notify failed:', e.message); /* notification optional — submission already stored */ }
 
     res.json({ success: true, message: 'Message received' });
   } catch (e) {

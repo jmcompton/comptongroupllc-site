@@ -915,4 +915,4 @@ router.post('/test-email', async (req, res) => {
   }
 });
 
-module.exports = { router, setPool };
+module.exports = { router, setPool, sendEmail };
