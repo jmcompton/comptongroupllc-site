@@ -12,7 +12,7 @@ const dns      = require('dns').promises;
 // Lazy-init so missing env vars at module-load time don't crash the server
 function getAI()     { return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }); }
 
-const MODEL      = 'claude-sonnet-4-20250514';
+const MODEL      = 'claude-sonnet-4-6';
 const FROM_EMAIL = process.env.SENDER_EMAIL || 'john@comptongroupllc.com';
 const DAILY_LIMIT = 10; // warmup default; adjustable per-run via run-outreach body.limit
 
