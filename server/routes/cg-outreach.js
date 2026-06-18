@@ -39,6 +39,22 @@ const COPY_STYLE_RULES = `WRITING STYLE, follow every rule exactly:
 - Avoid the rule-of-three cadence: do not stack three adjectives, phrases, or clauses for rhythm.
 - Write like a sharp, concise professional emailing another business owner: specific, warm but not salesy, short paragraphs, one clear ask.`;
 
+// Shared voice for the whole outreach sequence. Both the generic sequence
+// builder (/draft-sequence) and the per-prospect drafter (/prospects/:id/draft)
+// write in JohnMark's own voice: personal, plain, and built to get a call, never
+// to explain the solution. Layered on top of COPY_STYLE_RULES.
+const OUTREACH_VOICE = `You write as JohnMark. He runs a small company in the Atlanta and Birmingham area and helps small local businesses put AI to work in a simple, practical way.
+
+VOICE, follow every rule exactly:
+- Sound like a real person who typed this himself, not a marketer. Plain words, short, warm, direct. No clever copywriter lines, no balanced rule-of-three cadence, no fragments for effect.
+- Lead with the AI angle and ground it right away so it does not sound scary: the simple, practical kind, not the complicated stuff.
+- State the value plainly when it fits: more repeat business, saves time, a step ahead of competitors, zero extra work, and it is free.
+- NEVER explain HOW the AI works or what would get built. Tease one specific idea for their business and make a quick call or visit the only way to find out. It is easier to show them than to explain it in an email.
+- The goal of every email is a quick 15-minute call or a local in-person visit. JohnMark is local to both Atlanta and Birmingham.
+- Use contractions. First person. Sign email 1 with "JohnMark" then a line "Compton Group LLC". Sign emails 2 and 3 with just "JohnMark".
+
+${COPY_STYLE_RULES}`;
+
 // Backstop sanitizer (same idea as RepRoute's recap cleaner): guarantees a
 // generated email never ships an em/en dash or markdown character, no matter
 // what the model returns. Applied to every subject and body in the sequence.
@@ -594,22 +610,42 @@ router.post('/sequences', async (req, res) => {
 router.post('/draft-sequence', async (req, res) => {
   const { sequence_type } = req.body;
 
-  const prompts = {
-    efficiency: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC (comptongroupllc.com), a custom AI software development company. Target: small to mid-size business owner. Angle: we build custom AI tools that automate their biggest time-wasters and operational bottlenecks, saving 10-20 hours/week. Email 1: short curious hook about one specific inefficiency in their industry. Email 2: a concrete example of an AI tool we could build for them. Email 3: soft close offering a free 20-minute discovery call. Tone: direct, founder-to-founder, no corporate fluff. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
-
-    replace_software: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business still using outdated software (spreadsheets, legacy systems, generic tools). Angle: we replace clunky old software with a custom AI platform built specifically for their business, often for less than their current software subscriptions. Email 1: pain point hook about outdated tools slowing them down. Email 2: what a custom-built AI platform could look like for their business. Email 3: free audit offer where we review their current stack and show what we'd build instead. Tone: conversational, no jargon, founder voice. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
-
-    add_ai: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business doing well but not yet using AI. Angle: we add AI to their existing workflows without rebuilding anything, think AI that handles their reports, customer follow-ups, scheduling, or data analysis automatically. Email 1: curiosity hook about one AI use case relevant to their industry. Email 2: show a specific workflow we could automate for them in 2-4 weeks. Email 3: offer a free workflow analysis, 20 minutes, we identify their top 3 AI opportunities. Tone: energetic, specific, founder-to-founder. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
+  // Each sequence type leans the EMAIL 1 outcome a different way, but all three
+  // stay in the same personal, call-first voice and never explain the "how".
+  const angles = {
+    efficiency: 'Outcome angle: AI that quietly saves them time and hands-on work so the day runs smoother, without anyone lifting a finger.',
+    replace_software: 'Outcome angle: AI that handles more than the clunky tools they already pay for, without the headache, so more of their work just gets taken care of.',
+    add_ai: 'Outcome angle: AI that brings in more repeat business and keeps them a step ahead of the competitors who are not using it yet.',
   };
 
-  const prompt = prompts[sequence_type];
-  if (!prompt) return res.status(400).json({ error: 'Invalid sequence_type' });
+  const angle = angles[sequence_type];
+  if (!angle) return res.status(400).json({ error: 'Invalid sequence_type' });
+
+  const prompt = `Write a reusable 3-email cold outreach sequence in JohnMark's voice. This is a template, so keep {{company}} as a literal merge variable wherever the business name appears. Do not invent a company name. Since there is no specific prospect here, use a natural generic phrase like "businesses like yours around here" in place of a specific industry.
+
+${angle}
+
+EMAIL 1 must match this voice and structure exactly, keeping the {{company}} variable:
+Subject: what AI could actually do for {{company}}
+Body:
+Hey, I'm JohnMark. I run a small company in the Atlanta and Birmingham area, and I help small businesses put AI to work in a simple, practical way. Not the complicated stuff, just things that save you time and bring in more business.
+I was looking at {{company}} and had a specific idea for how AI could help you [a plainly stated outcome that fits the angle above], without adding anything to your plate. Almost nobody in businesses like yours around here is doing this yet, so it would put you a step ahead.
+Honestly, it's easier to show you than explain in an email. Give me 15 minutes on a call, or I'll swing by since I'm local, and I'll walk you through exactly what it would look like for your business. Free, no pressure.
+Worth a look?
+JohnMark
+Compton Group LLC
+
+EMAIL 2 (bump, a few days later): 3 to 4 sentences. Friendly, no guilt. Lightly reference the first note, restate the one benefit a different way, still no "how", same low-pressure ask for a quick call or visit. Sign "JohnMark".
+
+EMAIL 3 (close-out, last touch): 2 to 3 sentences. Easygoing "I'll leave you alone after this" tone, one last low-pressure opening for a quick call, no hard sell. Sign "JohnMark".
+
+Do not describe the tool or how the AI works anywhere. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`;
 
   try {
     const msg = await getAI().messages.create({
       model: MODEL,
       max_tokens: 2000,
-      system: `You are an expert B2B sales copywriter. Write concise, compelling cold emails, each under 150 words, in a direct founder-to-founder voice.\n\n${COPY_STYLE_RULES}`,
+      system: OUTREACH_VOICE,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -632,48 +668,25 @@ router.post('/draft-sequence', async (req, res) => {
 // Generate a personalized 3-email sequence for ONE prospect in JohnMark's voice,
 // using the prospect's captured signals. Stores into the draft_* columns and
 // marks drafted=true. Does NOT send — admin reviews/edits/approves first.
-const DRAFT_SYSTEM_PROMPT = `You write cold outreach emails for JohnMark, who runs a small software company (Compton Group LLC) in the Atlanta and Birmingham area building simple AI tools for local businesses.
+const DRAFT_SYSTEM_PROMPT = `${OUTREACH_VOICE}
 
-${COPY_STYLE_RULES}
+You have this prospect's details. Write the 3-email sequence and fill in their real company name, a specific outcome that fits their business, and their actual industry. Do not leave any brackets or {{...}} placeholders in the output, use the real values. Never name the tool or describe how it works, just the plainly stated result.
 
-HARD RULES:
-- Short, plain-text emails that sound like a real person typed them fast.
-- Use contractions. First person. Sign as "JohnMark".
-- One link max (and usually none).
-- Email 1 must be under ~90 words.
-- The offer is ALWAYS a FREE, no-pressure look (a quick 15-min call or a local in-person visit) where JohnMark shows one specific AI idea for their business.
-- NEVER pitch "custom software" and NEVER mention a price.
-
-Use these EXACT templates, filling {{...}} per the prospect:
-
-EMAIL 1 (opener)
-Subject: quick AI idea for {{business_name}}
-Hey {{first_name}},
-I'm JohnMark, and I run a small software company in the Atlanta and Birmingham area building simple AI tools for local businesses.
-I was checking out {{business_name}} and noticed {{observation}}. There's a quick AI setup that could {{benefit}}, and most shops your size aren't using it yet, so it's an easy edge.
-I'm not pitching some big expensive project. I'd just show you exactly what it'd look like for your business on a quick 15-min call, or swing by since I'm local. Free, no pressure.
+EMAIL 1 (initial). Match this voice and structure exactly, filling in the company, outcome, and industry:
+Subject: what AI could actually do for [company]
+Body:
+Hey, I'm JohnMark. I run a small company in the Atlanta and Birmingham area, and I help small businesses put AI to work in a simple, practical way. Not the complicated stuff, just things that save you time and bring in more business.
+I was looking at [company] and had a specific idea for how AI could help you [specific outcome for their business, for example land more repeat work], without adding anything to your plate. Almost nobody in [their industry] around here is doing this yet, so it would put you a step ahead.
+Honestly, it's easier to show you than explain in an email. Give me 15 minutes on a call, or I'll swing by since I'm local, and I'll walk you through exactly what it would look like for your business. Free, no pressure.
 Worth a look?
 JohnMark
 Compton Group LLC
 
-EMAIL 2 (bump)
-Subject: re: quick AI idea for {{business_name}}
-Hey {{first_name}}, bumping this in case it slipped by.
-If a call feels like a lot, I can just put together a quick 2-minute example of what the setup would do for {{business_name}} and send it over. No meeting needed. Just reply "send it" and I will.
-JohnMark
+EMAIL 2 (bump, a few days later): 3 to 4 sentences. Friendly, no guilt. Lightly reference the first note, restate the one benefit a different way, still no "how", same low-pressure ask for a quick call or visit. Sign "JohnMark".
 
-EMAIL 3 (close)
-Subject: re: quick AI idea for {{business_name}}
-Hey {{first_name}}, I'll leave it here so I'm not cluttering your inbox.
-If {{pain}} ever becomes worth fixing, just reply and I'll show you what's possible, free either way. Best of luck with {{business_name}}.
-JohnMark
+EMAIL 3 (close-out, last touch): 2 to 3 sentences. Easygoing "I'll leave you alone after this" tone, one last low-pressure opening for a quick call, no hard sell. Sign "JohnMark".
 
-PERSONALIZATION — pick the most relevant {{observation}}, {{benefit}}, {{pain}} from the prospect's signals/category:
-- No online booking → observation: "you don't have an easy way for customers to book online"; benefit: "let people book jobs right from their phone, day or night"; pain: "missed bookings"
-- Phone-only / no booking + service trade → observation: "it looks like everything runs through phone calls"; benefit: "instantly text back the calls you miss so you stop losing jobs"; pain: "missed calls"
-- Strong reviews but weak/no website → observation: "you've got great reviews but not much of a web presence"; benefit: "turn that reputation into more booked jobs automatically"; pain: "leads slipping through"
-You may adapt the wording slightly to fit the business, but keep the voice and structure.
-{{first_name}}: use the contact's first name; if unknown, use a natural greeting ("Hey there") or the business name.
+Pick the specific outcome from the prospect's signals (their noted AI opportunity, no online booking, phone-only intake, strong reviews but a weak web presence, and so on). Keep it to a plainly stated result like more repeat business, fewer missed calls, or more booked jobs, never a description of the tool or how it works.
 
 Return JSON ONLY, no markdown, with exactly these keys:
 {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`;
@@ -985,10 +998,10 @@ router.post('/test-email', async (req, res) => {
     return res.status(400).json({ error: 'A valid recipient email is required' });
   }
   const recipient = to.trim();
-  const subject = 'Compton Group LLC — Microsoft Graph test email';
+  const subject = 'Microsoft Graph test email (Compton Group LLC)';
   const html = `<div style="font-family:Arial,sans-serif;max-width:600px;line-height:1.7;color:#1a1a2e">
 <p>This is a test email sent from the CG Outreach Agent via the Microsoft Graph API.</p>
-<p>If you are reading this, Microsoft 365 sending is wired up correctly. ✅</p>
+<p>If you are reading this, Microsoft 365 sending is wired up correctly.</p>
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
 <p style="font-size:11px;color:#6b7280">
   JohnMark Compton · Founder, Compton Group LLC<br>
