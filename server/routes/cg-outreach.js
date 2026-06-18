@@ -797,17 +797,23 @@ router.post('/run-outreach', async (req, res) => {
 
     const prospects = prospectsR.rows;
     if (!prospects.length) {
-      return res.json({ sent: 0, message: 'No approved prospects ready for outreach' });
+      return res.json({
+        sent: 0,
+        total_prospects: 0,
+        skipped: 0,
+        message: 'No prospects ready to send. A prospect must be email-verified, drafted, and approved before it appears here.',
+      });
     }
 
     let sent = 0;
+    let skipped = 0; // fetched but neither sent nor errored (e.g. waiting on the send-interval gate)
     const errors = [];
     const now = new Date();
 
     for (const p of prospects) {
       // Safety: never send to a prospect who has replied, been marked done, or opted out.
-      if (['replied', 'converted', 'skipped'].includes(p.status)) continue;
-      if (p.opted_out) continue;
+      if (['replied', 'converted', 'skipped'].includes(p.status)) { skipped++; continue; }
+      if (p.opted_out) { skipped++; continue; }
 
       // Hard gate: never send without a real, verified email. No self-fallback.
       if (!p.email_verified || !p.email || !EMAIL_RX.test(String(p.email).trim())) {
@@ -832,7 +838,7 @@ router.post('/run-outreach', async (req, res) => {
         const daysSince = p.email1_sent_at
           ? (now - new Date(p.email1_sent_at)) / 86400000
           : 99;
-        if (daysSince < 3) continue;
+        if (daysSince < 3) { skipped++; continue; } // not yet 3 days since email 1
         emailNum  = 2;
         subject   = p.draft_email2_subject;
         body      = p.draft_email2_body;
@@ -842,7 +848,7 @@ router.post('/run-outreach', async (req, res) => {
         const daysSince = p.email2_sent_at
           ? (now - new Date(p.email2_sent_at)) / 86400000
           : 99;
-        if (daysSince < 4) continue;
+        if (daysSince < 4) { skipped++; continue; } // not yet 4 days since email 2
         emailNum  = 3;
         subject   = p.draft_email3_subject;
         body      = p.draft_email3_body;
@@ -894,7 +900,7 @@ ${personalBody.replace(/\n/g, '<br>')}
       }
     }
 
-    res.json({ sent, total_prospects: prospects.length, errors: errors.length ? errors : undefined });
+    res.json({ sent, total_prospects: prospects.length, skipped, errors: errors.length ? errors : undefined });
   } catch (e) {
     console.error('[cg/run-outreach]', e.message);
     res.status(500).json({ error: e.message });

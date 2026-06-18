@@ -1479,6 +1479,7 @@ button,input,select,textarea{font-family:inherit}
           <button class="ag-btn ag-btn-green" id="run-outreach-btn" onclick="runOutreach()">▶ Run Outreach Now</button>
         </div>
       </div>
+      <div id="run-result" style="display:none;margin-top:10px;padding:12px 14px;border-radius:8px;font-size:12px;line-height:1.55"></div>
       <div class="run-bar" style="margin-top:12px">
         <div>
           <div style="font-size:13px;font-weight:600;color:#f0f0f5;margin-bottom:2px">Send Test Email</div>
@@ -2206,18 +2207,64 @@ async function runOutreach() {
       body: JSON.stringify({ limit }),
     });
     const data = await r.json();
-    if (r.ok) {
-      showToast(`Sent ${data.sent} email${data.sent !== 1 ? 's' : ''}!`);
-      loadLog();
-    } else {
-      showToast(`Error: ${data.error}`, true);
+    if (!r.ok) {
+      showRunResult('error', `Error: ${data.error || 'request failed'}`);
+      showToast(`Error: ${data.error || 'request failed'}`, true);
+      return;
     }
+
+    const sent = data.sent || 0;
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+    const skipped = data.skipped || 0;
+
+    if (errors.length) {
+      // Some/all sends failed — surface the real per-prospect error strings.
+      const shown = errors.slice(0, 5)
+        .map(e => `• ${e.company || 'Unknown'}: ${e.error || 'unknown error'}`);
+      if (errors.length > shown.length) shown.push(`…and ${errors.length - shown.length} more`);
+      const head = `${sent} sent, ${errors.length} failed${skipped ? `, ${skipped} skipped` : ''}.`;
+      showRunResult('error', `${head}\n${shown.join('\n')}`);
+      showToast(`${sent} sent, ${errors.length} failed — see details below`, true);
+    } else if (sent > 0) {
+      // Real success path — left intact.
+      const tail = skipped ? ` (${skipped} skipped, waiting on the send interval)` : '';
+      showRunResult('ok', `Sent ${sent} email${sent !== 1 ? 's' : ''}.${tail}`);
+      showToast(`Sent ${sent} email${sent !== 1 ? 's' : ''}!`);
+    } else {
+      // 0 sent, no errors — explain why instead of "Sent 0 emails!".
+      let why;
+      if (data.message) why = data.message;
+      else if (skipped) why = `0 sent. ${skipped} prospect${skipped !== 1 ? 's' : ''} skipped (waiting on the 3–4 day send interval before the next email).`;
+      else why = '0 sent. No prospects were ready. A prospect must be email-verified, drafted, and approved first.';
+      showRunResult('warn', why);
+      showToast('0 sent — see details below', true);
+    }
+    loadLog();
   } catch (e) {
+    showRunResult('error', `Error: ${e.message}`);
     showToast(`Error: ${e.message}`, true);
   } finally {
     btn.disabled = false;
     btn.textContent = '▶ Run Outreach Now';
   }
+}
+
+// Render the persistent run-result panel below the Run button. kind = ok|warn|error.
+function showRunResult(kind, text) {
+  const el = document.getElementById('run-result');
+  if (!el) return;
+  const styles = {
+    ok:    { bg: 'rgba(74,222,128,0.10)', border: 'rgba(74,222,128,0.30)', color: '#4ade80' },
+    warn:  { bg: 'rgba(234,179,8,0.10)',  border: 'rgba(234,179,8,0.35)',  color: '#facc15' },
+    error: { bg: 'rgba(255,80,80,0.10)',  border: 'rgba(255,80,80,0.32)',  color: '#ff9090' },
+  };
+  const s = styles[kind] || styles.warn;
+  el.style.display = 'block';
+  el.style.background = s.bg;
+  el.style.border = `1px solid ${s.border}`;
+  el.style.color = s.color;
+  el.style.whiteSpace = 'pre-wrap';
+  el.textContent = text;
 }
 
 async function sendTestEmail() {
