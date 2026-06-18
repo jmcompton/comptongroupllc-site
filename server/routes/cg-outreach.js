@@ -261,6 +261,165 @@ async function domainHasMx(email) {
   }
 }
 
+// ── On-site email scraping (primary discovery) ───────────────────────────────
+// For a small owner-operated business, the email is almost always printed on
+// their own website even when web search can't surface it. So we read it off
+// the site first, then fall back to Claude web_search, then (optionally) a
+// pattern guess. All on-site logic is plain fetch + regex, no external API.
+
+// Common pages where a small business prints its contact email.
+const CONTACT_PATHS = ['', '/contact', '/contact-us', '/about', '/about-us'];
+
+// Free webmail providers we accept ONLY when nothing on the business's own
+// domain exists but the address is published on their page.
+const FREE_EMAIL_PROVIDERS = [
+  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'aol.com',
+  'icloud.com', 'live.com', 'msn.com', 'comcast.net', 'att.net', 'bellsouth.net',
+];
+
+// Platform/CDN/placeholder domains that show up in page markup but are never a
+// real business contact address.
+const EMAIL_DOMAIN_BLOCKLIST = [
+  'wix.com', 'wixpress.com', 'parastorage.com', 'squarespace.com', 'godaddy.com',
+  'secureserver.net', 'sentry.io', 'sentry.wixpress.com', 'wordpress.com', 'wp.com',
+  'shopify.com', 'myshopify.com', 'cloudflare.com', 'google.com', 'googleapis.com',
+  'gstatic.com', 'schema.org', 'w3.org', 'jsdelivr.net', 'jquery.com', 'fontawesome.com',
+  'example.com', 'example.org', 'domain.com', 'yourdomain.com', 'email.com', 'test.com',
+  'sentry-next.wixpress.com',
+];
+
+// Asset/file extensions that the email regex can falsely match (e.g. "logo@2x.png").
+const ASSET_EXT_RX = /\.(png|jpe?g|gif|svg|webp|bmp|ico|css|js|mjs|json|woff2?|ttf|eot|pdf|mp4|webm|avif)$/i;
+
+// Generic role mailboxes (used both for ranking and email_type classification).
+const ROLE_LOCALS = [
+  'info', 'contact', 'hello', 'office', 'sales', 'admin', 'support', 'team',
+  'help', 'service', 'bookings', 'booking', 'appointments', 'scheduling', 'mail',
+];
+
+// Bare hostname of a website URL (no scheme, no www, lowercased).
+function domainFromUrl(u) {
+  try {
+    const url = new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u);
+    return url.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+// Pull every plausible email out of one page's HTML: mailto: links first, then
+// a plain regex sweep over the markup/text.
+function extractEmailsFromHtml(html) {
+  const found = new Set();
+  if (!html) return [];
+  const mailtoRx = /mailto:([^"'?>\s]+)/gi;
+  let m;
+  while ((m = mailtoRx.exec(html))) {
+    let addr = m[1];
+    try { addr = decodeURIComponent(addr); } catch (_) {}
+    found.add(addr.trim().toLowerCase());
+  }
+  const emailRx = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+  while ((m = emailRx.exec(html))) found.add(m[0].trim().toLowerCase());
+  return [...found];
+}
+
+// True if an extracted string is clearly NOT a real business contact email.
+function isJunkEmail(email) {
+  if (!isValidEmailFormat(email)) return true;
+  if (ASSET_EXT_RX.test(email)) return true;            // logo@2x.png, sprite@3x.svg, etc.
+  const at = email.lastIndexOf('@');
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (/^\d+x?$/i.test(local)) return true;              // version tokens like "2x"
+  if (/(sentry|wixpress|parastorage|cloudfront|cdn\.|\.cdn)/i.test(domain)) return true;
+  if (EMAIL_DOMAIN_BLOCKLIST.some(b => domain === b || domain.endsWith('.' + b))) return true;
+  return false;
+}
+
+function classifyLocal(localPart) {
+  return ROLE_LOCALS.includes(localPart.toLowerCase()) ? 'role' : 'owner';
+}
+
+// From all candidates scraped off the site, pick the single best contact email.
+// Strongly prefers an address on the business's OWN domain; only falls back to a
+// free-webmail address that was actually printed on their page.
+function pickBestEmail(emails, siteDomain) {
+  const clean = [...new Set(emails)].filter(e => !isJunkEmail(e));
+  if (!clean.length) return null;
+
+  const onDomain = clean.filter(e => {
+    const d = e.slice(e.lastIndexOf('@') + 1);
+    return siteDomain && (d === siteDomain || d.endsWith('.' + siteDomain) || siteDomain.endsWith('.' + d));
+  });
+  const freeOnPage = clean.filter(e => FREE_EMAIL_PROVIDERS.includes(e.slice(e.lastIndexOf('@') + 1)));
+
+  // On-domain wins outright; otherwise a published free-webmail address.
+  const pool = onDomain.length ? onDomain : freeOnPage;
+  if (!pool.length) return null;
+
+  // Rank preferred role mailboxes first, then anything else (e.g. an owner name).
+  const pref = ['info', 'contact', 'hello', 'office', 'sales'];
+  pool.sort((a, b) => {
+    const la = a.slice(0, a.lastIndexOf('@'));
+    const lb = b.slice(0, b.lastIndexOf('@'));
+    const sa = pref.indexOf(la) === -1 ? 99 : pref.indexOf(la);
+    const sb = pref.indexOf(lb) === -1 ? 99 : pref.indexOf(lb);
+    return sa - sb;
+  });
+
+  const chosen = pool[0];
+  const domain = chosen.slice(chosen.lastIndexOf('@') + 1);
+  const local = chosen.slice(0, chosen.lastIndexOf('@'));
+  const type = FREE_EMAIL_PROVIDERS.includes(domain) ? 'generic' : classifyLocal(local);
+  return { email: chosen, email_type: type };
+}
+
+// Best-effort fetch of one page. Short timeout, normal User-Agent, never throws.
+async function fetchPage(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    if (!resp.ok) return '';
+    const ct = (resp.headers.get('content-type') || '').toLowerCase();
+    if (ct && !ct.includes('html') && !ct.includes('text') && !ct.includes('xml')) return '';
+    return await resp.text();
+  } catch (_) {
+    return ''; // timeout / blocked / DNS / network → just skip this page
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Read the best on-domain contact email straight off the business's website.
+// Returns { email, email_type, email_source:'website' } or { email:'' }.
+async function discoverEmailFromWebsite(p) {
+  const website = (p.website || '').trim();
+  if (!website) return { email: '' };
+  const base = /^https?:\/\//i.test(website) ? website : 'https://' + website;
+  let origin;
+  try { origin = new URL(base).origin; } catch (_) { return { email: '' }; }
+  const siteDomain = domainFromUrl(base);
+
+  const urls = CONTACT_PATHS.map(path => origin + path);
+  const pages = await Promise.all(urls.map(u => fetchPage(u))); // failures resolve to ''
+  const emails = [];
+  for (const html of pages) {
+    if (html) emails.push(...extractEmailsFromHtml(html));
+  }
+  const best = pickBestEmail(emails, siteDomain);
+  if (!best) return { email: '' };
+  return { email: best.email, email_type: best.email_type, email_source: 'website' };
+}
+
 // Ask Claude (with web search) to find the best published email for ONE prospect.
 // Returns { email, email_type, email_source } with email_type in
 // 'owner'|'role'|'generic', or { email: '' } when nothing real is found.
@@ -317,27 +476,63 @@ Return JSON ONLY, no markdown, exactly:
 }
 
 // Discover + verify + persist the best email for one prospect row.
+// Pipeline: (1) scrape the business's own website, (2) Claude web_search
+// fallback, (3) optional pattern guess (OFF unless ALLOW_PATTERN_EMAILS=true).
 // Returns { ok, email, email_type, email_source, reason }.
 async function findAndVerifyEmailFor(p) {
-  let cand;
-  try {
-    cand = await discoverBestEmail(p);
-  } catch (e) {
-    return { ok: false, reason: 'discovery_failed: ' + e.message };
+  const website = (p.website || '').trim();
+  let cand = null; // { email, email_type, email_source }
+
+  // 1. PRIMARY: read the email straight off the business's own website.
+  if (website) {
+    try {
+      const w = await discoverEmailFromWebsite(p);
+      if (w && w.email) cand = w;
+    } catch (_) { /* ignore and fall through to web_search */ }
   }
-  if (!cand.email) return { ok: false, reason: 'no_published_email_found' };
-  if (!isValidEmailFormat(cand.email)) return { ok: false, reason: 'invalid_format' };
-  const mxOk = await domainHasMx(cand.email);
-  if (!mxOk) return { ok: false, reason: 'no_mx_records' };
+
+  // 2. FALLBACK: Claude web_search for a genuinely published address.
+  if (!cand) {
+    try {
+      const ws = await discoverBestEmail(p);
+      if (ws && ws.email) {
+        cand = { email: ws.email, email_type: ws.email_type, email_source: ws.email_source || 'web_search' };
+      }
+    } catch (_) { /* ignore — handled by reason codes below */ }
+  }
+
+  // 3. OPTIONAL pattern guess (OFF by default). Only info@<domain>, and only if
+  // the domain actually has MX. Guessed addresses bounce, and bounces hurt
+  // sender reputation, so this stays gated behind ALLOW_PATTERN_EMAILS=true.
+  if (!cand && website && String(process.env.ALLOW_PATTERN_EMAILS).toLowerCase() === 'true') {
+    const domain = domainFromUrl(website);
+    if (domain) {
+      const guess = `info@${domain}`;
+      if (isValidEmailFormat(guess) && await domainHasMx(guess)) {
+        cand = { email: guess, email_type: 'generic', email_source: 'pattern_guess' };
+      }
+    }
+  }
+
+  // No candidate at all → clear reason code for the UI.
+  if (!cand || !cand.email) {
+    if (!website) return { ok: false, reason: 'no_website' };
+    return { ok: false, reason: 'no_email_on_site' };
+  }
+
+  // Keep the existing format + MX gates before anything is stored.
+  const email = cand.email.trim().toLowerCase();
+  if (!isValidEmailFormat(email)) return { ok: false, reason: 'invalid_format' };
+  if (!(await domainHasMx(email))) return { ok: false, reason: 'no_mx_records' };
 
   // Verified — safe to store.
   await pool.query(
     `UPDATE cg_prospects
        SET email=$1, email_type=$2, email_verified=TRUE, email_source=$3
      WHERE id=$4`,
-    [cand.email, cand.email_type, cand.email_source || '', p.id]
+    [email, cand.email_type || 'generic', cand.email_source || '', p.id]
   );
-  return { ok: true, email: cand.email, email_type: cand.email_type, email_source: cand.email_source };
+  return { ok: true, email, email_type: cand.email_type || 'generic', email_source: cand.email_source || '' };
 }
 
 // ── POST /api/cg/prospects/:id/find-email ─────────────────────────────────────
@@ -1056,4 +1251,8 @@ router.post('/process-reply', async (req, res) => {
   }
 });
 
-module.exports = { router, setPool, sendEmail, sanitizeOutreachText, sanitizeSequence };
+module.exports = {
+  router, setPool, sendEmail, sanitizeOutreachText, sanitizeSequence,
+  // Exposed for tests/diagnostics of the on-site email finder.
+  extractEmailsFromHtml, isJunkEmail, pickBestEmail, domainFromUrl, discoverEmailFromWebsite,
+};
