@@ -27,6 +27,57 @@ function isOptOutMessage(text) {
   return /\bstop\b/.test(t) || /unsubscribe/.test(t);
 }
 
+// ── Outreach copy style + sanitizer ──────────────────────────────────────────
+// Shared writing rules injected into every outreach-generation system prompt so
+// the model produces professional copy with no em/en dashes, no markdown, no
+// emoji, and none of the usual AI-tell vocabulary.
+const COPY_STYLE_RULES = `WRITING STYLE, follow every rule exactly:
+- NEVER use an em dash or an en dash. Use a period, a comma, or parentheses instead.
+- No markdown of any kind (no *, _, #, backticks, >, links). No emoji. No bullet or numbered lists.
+- NEVER use any of these words or phrases: delve, leverage, robust, furthermore, moreover, additionally, streamline, foster, navigate, underscore, testament, "in today's landscape", "it's worth noting", "I hope this email finds you well".
+- No throat-clearing or warm-up intros. The first sentence gets to the point.
+- Avoid the rule-of-three cadence: do not stack three adjectives, phrases, or clauses for rhythm.
+- Write like a sharp, concise professional emailing another business owner: specific, warm but not salesy, short paragraphs, one clear ask.`;
+
+// Backstop sanitizer (same idea as RepRoute's recap cleaner): guarantees a
+// generated email never ships an em/en dash or markdown character, no matter
+// what the model returns. Applied to every subject and body in the sequence.
+function sanitizeOutreachText(input) {
+  let s = String(input == null ? '' : input);
+
+  // Long dashes → professional punctuation.
+  s = s.replace(/\s*[—―]\s*/g, ', ');          // em dash / horizontal bar → comma
+  s = s.replace(/(\d)\s*[–‒]\s*(\d)/g, '$1-$2'); // numeric range en dash → hyphen
+  s = s.replace(/\s*[–‒]\s*/g, ', ');          // remaining en/figure dash → comma
+  s = s.replace(/[‐‑]/g, '-');                 // unicode hyphens → ascii hyphen
+
+  // Strip markdown syntax.
+  s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');       // [text](url) / ![alt](url) → text
+  s = s.replace(/^\s{0,3}\d+\.\s+/gm, '');               // numbered-list markers
+  s = s.replace(/^\s{0,3}[-+*]\s+/gm, '');               // bullet-list markers
+  s = s.replace(/[*_`#>~]/g, '');                        // ** __ * _ ` # > ~ markers
+
+  // Tidy punctuation/whitespace the replacements can create.
+  s = s.replace(/ +,/g, ',').replace(/,{2,}/g, ',');
+  s = s.replace(/,\s*\./g, '.');
+  s = s.replace(/[ \t]{2,}/g, ' ');
+  s = s.replace(/ +\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return s.trim();
+}
+
+// Sanitize every email field of a generated 3-email sequence object in place.
+function sanitizeSequence(seq) {
+  if (!seq || typeof seq !== 'object') return seq;
+  for (const k of [
+    'email1_subject', 'email1_body',
+    'email2_subject', 'email2_body',
+    'email3_subject', 'email3_body',
+  ]) {
+    if (seq[k] != null) seq[k] = sanitizeOutreachText(seq[k]);
+  }
+  return seq;
+}
+
 // ── Local targeting config ───────────────────────────────────────────────────
 // Prospect discovery is constrained to these two metros + surrounding suburbs.
 // Anything outside is rejected at insert time.
@@ -546,9 +597,9 @@ router.post('/draft-sequence', async (req, res) => {
   const prompts = {
     efficiency: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC (comptongroupllc.com), a custom AI software development company. Target: small to mid-size business owner. Angle: we build custom AI tools that automate their biggest time-wasters and operational bottlenecks, saving 10-20 hours/week. Email 1: short curious hook about one specific inefficiency in their industry. Email 2: a concrete example of an AI tool we could build for them. Email 3: soft close offering a free 20-minute discovery call. Tone: direct, founder-to-founder, no corporate fluff. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
 
-    replace_software: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business still using outdated software (spreadsheets, legacy systems, generic tools). Angle: we replace clunky old software with a custom AI platform built specifically for their business, often for less than their current software subscriptions. Email 1: pain point hook about outdated tools slowing them down. Email 2: what a custom-built AI platform could look like for their business. Email 3: free audit offer — we review their current stack and show what we'd build instead. Tone: conversational, no jargon, founder voice. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
+    replace_software: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business still using outdated software (spreadsheets, legacy systems, generic tools). Angle: we replace clunky old software with a custom AI platform built specifically for their business, often for less than their current software subscriptions. Email 1: pain point hook about outdated tools slowing them down. Email 2: what a custom-built AI platform could look like for their business. Email 3: free audit offer where we review their current stack and show what we'd build instead. Tone: conversational, no jargon, founder voice. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
 
-    add_ai: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business doing well but not yet using AI. Angle: we add AI to their existing workflows without rebuilding anything — think AI that handles their reports, customer follow-ups, scheduling, or data analysis automatically. Email 1: curiosity hook about one AI use case relevant to their industry. Email 2: show a specific workflow we could automate for them in 2-4 weeks. Email 3: offer a free workflow analysis — 20 minutes, we identify their top 3 AI opportunities. Tone: energetic, specific, founder-to-founder. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
+    add_ai: `Write a 3-email cold outreach sequence from JohnMark Compton, founder of Compton Group LLC, targeting a small/mid-size business doing well but not yet using AI. Angle: we add AI to their existing workflows without rebuilding anything, think AI that handles their reports, customer follow-ups, scheduling, or data analysis automatically. Email 1: curiosity hook about one AI use case relevant to their industry. Email 2: show a specific workflow we could automate for them in 2-4 weeks. Email 3: offer a free workflow analysis, 20 minutes, we identify their top 3 AI opportunities. Tone: energetic, specific, founder-to-founder. Return JSON only: {"email1_subject":"...","email1_body":"...","email2_subject":"...","email2_body":"...","email3_subject":"...","email3_body":"..."}`,
   };
 
   const prompt = prompts[sequence_type];
@@ -558,7 +609,7 @@ router.post('/draft-sequence', async (req, res) => {
     const msg = await getAI().messages.create({
       model: MODEL,
       max_tokens: 2000,
-      system: `You are an expert B2B SaaS sales copywriter. Write concise, compelling cold emails. Keep each email under 150 words. Direct. No fluff. No "I hope this email finds you well." Founder-to-founder voice.`,
+      system: `You are an expert B2B sales copywriter. Write concise, compelling cold emails, each under 150 words, in a direct founder-to-founder voice.\n\n${COPY_STYLE_RULES}`,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -569,6 +620,7 @@ router.post('/draft-sequence', async (req, res) => {
     } catch (parseErr) {
       return res.status(500).json({ error: 'AI returned unparseable JSON' });
     }
+    sanitizeSequence(seq); // backstop: strip any em/en dashes + markdown the model slipped in
     res.json(seq);
   } catch (e) {
     console.error('[cg/draft-sequence]', e.message);
@@ -580,15 +632,16 @@ router.post('/draft-sequence', async (req, res) => {
 // Generate a personalized 3-email sequence for ONE prospect in JohnMark's voice,
 // using the prospect's captured signals. Stores into the draft_* columns and
 // marks drafted=true. Does NOT send — admin reviews/edits/approves first.
-const DRAFT_SYSTEM_PROMPT = `You write cold outreach emails for JohnMark, who runs a small software company (Compton Group LLC) in the Atlanta–Birmingham area building simple AI tools for local businesses.
+const DRAFT_SYSTEM_PROMPT = `You write cold outreach emails for JohnMark, who runs a small software company (Compton Group LLC) in the Atlanta and Birmingham area building simple AI tools for local businesses.
+
+${COPY_STYLE_RULES}
 
 HARD RULES:
 - Short, plain-text emails that sound like a real person typed them fast.
 - Use contractions. First person. Sign as "JohnMark".
-- NO markdown. NO buzzwords (never "solutions", "leverage", "cutting-edge", "revolutionize"). NO corporate tone. No "I hope this email finds you well."
 - One link max (and usually none).
 - Email 1 must be under ~90 words.
-- The offer is ALWAYS a FREE, no-pressure look — a quick 15-min call OR a local in-person visit — where JohnMark shows one specific AI idea for their business.
+- The offer is ALWAYS a FREE, no-pressure look (a quick 15-min call or a local in-person visit) where JohnMark shows one specific AI idea for their business.
 - NEVER pitch "custom software" and NEVER mention a price.
 
 Use these EXACT templates, filling {{...}} per the prospect:
@@ -596,8 +649,8 @@ Use these EXACT templates, filling {{...}} per the prospect:
 EMAIL 1 (opener)
 Subject: quick AI idea for {{business_name}}
 Hey {{first_name}},
-I'm JohnMark — I run a small software company in the Atlanta–Birmingham area and I build simple AI tools for local businesses.
-I was checking out {{business_name}} and noticed {{observation}}. There's a quick AI setup that could {{benefit}} — and most shops your size aren't using it yet, so it's an easy edge.
+I'm JohnMark, and I run a small software company in the Atlanta and Birmingham area building simple AI tools for local businesses.
+I was checking out {{business_name}} and noticed {{observation}}. There's a quick AI setup that could {{benefit}}, and most shops your size aren't using it yet, so it's an easy edge.
 I'm not pitching some big expensive project. I'd just show you exactly what it'd look like for your business on a quick 15-min call, or swing by since I'm local. Free, no pressure.
 Worth a look?
 JohnMark
@@ -605,14 +658,14 @@ Compton Group LLC
 
 EMAIL 2 (bump)
 Subject: re: quick AI idea for {{business_name}}
-Hey {{first_name}} — bumping this in case it slipped by.
-If a call feels like a lot, I can just put together a quick 2-minute example of what the setup would do for {{business_name}} and send it over. No meeting needed — just reply "send it" and I will.
+Hey {{first_name}}, bumping this in case it slipped by.
+If a call feels like a lot, I can just put together a quick 2-minute example of what the setup would do for {{business_name}} and send it over. No meeting needed. Just reply "send it" and I will.
 JohnMark
 
 EMAIL 3 (close)
 Subject: re: quick AI idea for {{business_name}}
 Hey {{first_name}}, I'll leave it here so I'm not cluttering your inbox.
-If {{pain}} ever becomes worth fixing, just reply and I'll show you what's possible — free either way. Best of luck with {{business_name}}.
+If {{pain}} ever becomes worth fixing, just reply and I'll show you what's possible, free either way. Best of luck with {{business_name}}.
 JohnMark
 
 PERSONALIZATION — pick the most relevant {{observation}}, {{benefit}}, {{pain}} from the prospect's signals/category:
@@ -662,6 +715,8 @@ router.post('/prospects/:id/draft', async (req, res) => {
     } catch (parseErr) {
       return res.status(500).json({ error: 'AI returned unparseable JSON' });
     }
+
+    sanitizeSequence(seq); // backstop: strip any em/en dashes + markdown before storing
 
     const updated = await pool.query(
       `UPDATE cg_prospects SET
@@ -982,4 +1037,4 @@ router.post('/process-reply', async (req, res) => {
   }
 });
 
-module.exports = { router, setPool, sendEmail };
+module.exports = { router, setPool, sendEmail, sanitizeOutreachText, sanitizeSequence };
